@@ -15,7 +15,7 @@ def arguments(**overrides):
             "label_key": "completion",
             "loss_type": "sft_loss",
             "n_samples_per_prompt": 1,
-            "disable_compute_advantages_and_returns": True,
+            "compute_advantages_and_returns": False,
             "apply_chat_template": False,
             "hf_checkpoint": "student",
             "loss_mask_type": "qwen3",
@@ -105,9 +105,9 @@ def test_message_masks_override_input_flags():
         {"n_samples_per_prompt": 2},
         {"loss_type": "policy_loss"},
         {"rollout_global_dataset": False},
-        {"disable_compute_advantages_and_returns": False},
+        {"compute_advantages_and_returns": True},
         {"loss_mask_type": "distill_qwen"},
-        {"tool_key": "tools"},
+        {"multimodal_keys": {"image": "image"}},
     ],
 )
 def test_invalid_configuration_fails_before_loading_slime(override):

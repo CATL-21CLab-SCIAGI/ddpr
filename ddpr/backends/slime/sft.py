@@ -42,14 +42,14 @@ def _validate_args(args: Namespace, evaluation: bool) -> None:
         "label_key": "completion",
         "loss_type": "sft_loss",
         "n_samples_per_prompt": 1,
-        "disable_compute_advantages_and_returns": True,
+        "compute_advantages_and_returns": False,
     }
     for name, expected in required.items():
         if getattr(args, name, None) != expected:
             raise ValueError(f"ddpr SFT requires {name}={expected!r}")
     if getattr(args, "apply_chat_template", False):
         raise ValueError("leave --apply-chat-template unset for ddpr SFT")
-    if getattr(args, "multimodal_keys", None) or getattr(args, "tool_key", None):
+    if getattr(args, "multimodal_keys", None):
         raise ValueError("ddpr SFT supports exported text conversations only")
     if args.loss_mask_type not in ("qwen", "qwen3", "qwen3_5"):
         raise ValueError("use a supported multi-turn loss mask: qwen, qwen3, qwen3_5")
