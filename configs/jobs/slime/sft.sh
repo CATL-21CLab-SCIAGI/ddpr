@@ -6,6 +6,7 @@ DDPR_SFT_ARGS=(
     --input-key prompt
     --label-key completion
     --metadata-key metadata
+    --data-source-path ddpr.backends.slime.plugin.RolloutDataSource
     --rollout-function-path ddpr.backends.slime.sft.generate_rollout
     --loss-mask-type "${DDPR_LOSS_MASK_TYPE:?Set the student loss mask type}"
     --n-samples-per-prompt 1

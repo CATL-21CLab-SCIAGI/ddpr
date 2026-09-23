@@ -1,0 +1,11 @@
+{
+  "slime": {
+    "repository": "https://github.com/THUDM/slime.git",
+    "revision": "4c193f1f37509cca70f0e88807a9305b70f63f4e",
+    "gpu_revision": "06ffdbe22be068b52f9ed0fc318c473f7030197e"
+  },
+  "ms-swift": {
+    "repository": "https://github.com/modelscope/ms-swift.git",
+    "revision": "ae700468052af1e461857b6f41eee65aa1641f45"
+  }
+}

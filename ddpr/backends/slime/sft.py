@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 from argparse import Namespace
-from copy import copy
+from collections.abc import Mapping
+from copy import copy, deepcopy
 from functools import lru_cache
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import Any
 
-if TYPE_CHECKING:
-    from slime.rollout.data_source import DataSource
-    from slime.utils.mask_utils import MultiTurnLossMaskGenerator
-    from slime.utils.types import Sample
+from slime.rollout.data_source import DataSource
+from slime.utils.mask_utils import MultiTurnLossMaskGenerator
+from slime.utils.processing_utils import load_tokenizer
+from slime.utils.types import Sample
 
-from ddpr.data.adapters.ddsr_bench import load_sample
+from ddpr.backends.slime import data
+from ddpr.backends.slime.data import load_sample
 from ddpr.data.schemas import SftSample
 
 
@@ -21,12 +24,35 @@ def _messages(example: SftSample) -> list[dict[str, str | int]]:
     ]
 
 
+def _source(record: Mapping[str, Any]) -> Sample:
+    example = load_sample(record)
+    sample = Sample(
+        prompt=[dict(message) for message in example.prompt],
+        label=[dict(message) for message in example.completion],
+        metadata=deepcopy(example.metadata),
+    )
+    sample.sample_id = example.id
+    return sample
+
+
+def load_samples(args: Namespace) -> list[Sample]:
+    """Keep exported IDs and original messages for completion-only SFT."""
+    _validate_args(args, evaluation=False)
+    source_path = Path(args.prompt_data).expanduser()
+    samples = []
+    for line_number, record in data.read_records(source_path):
+        try:
+            samples.append(_source(record))
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"{source_path}:{line_number}: {error}") from error
+    if getattr(args, "dump_details", None) is not None:
+        tokenizer = load_tokenizer(args.hf_checkpoint, trust_remote_code=True)
+        tokenizer.save_pretrained(Path(args.dump_details) / "tokenizer")
+    return samples
+
+
 @lru_cache(maxsize=1)
 def _mask_generator(checkpoint: str, mask_type: str) -> MultiTurnLossMaskGenerator:
-    # Slime is installed separately in the training worker environment.
-    from slime.utils.mask_utils import MultiTurnLossMaskGenerator
-    from slime.utils.processing_utils import load_tokenizer
-
     tokenizer = load_tokenizer(checkpoint, trust_remote_code=True)
     if mask_type == "qwen" and "<｜Assistant｜>" in tokenizer.get_added_vocab():
         raise ValueError("Slime's distill_qwen mask drops multi-message context")
@@ -40,6 +66,7 @@ def _validate_args(args: Namespace, evaluation: bool) -> None:
         "rollout_global_dataset": True,
         "input_key": "prompt",
         "label_key": "completion",
+        "metadata_key": "metadata",
         "loss_type": "sft_loss",
         "n_samples_per_prompt": 1,
         "compute_advantages_and_returns": False,
@@ -49,8 +76,10 @@ def _validate_args(args: Namespace, evaluation: bool) -> None:
             raise ValueError(f"ddpr SFT requires {name}={expected!r}")
     if getattr(args, "apply_chat_template", False):
         raise ValueError("leave --apply-chat-template unset for ddpr SFT")
-    if getattr(args, "multimodal_keys", None):
-        raise ValueError("ddpr SFT supports exported text conversations only")
+    if getattr(args, "apply_chat_template_kwargs", None):
+        raise ValueError("ddpr SFT loss masks do not support chat-template kwargs")
+    if getattr(args, "multimodal_keys", None) or getattr(args, "tool_key", None):
+        raise ValueError("ddpr SFT supports text conversations without tools")
     if args.loss_mask_type not in ("qwen", "qwen3", "qwen3_5"):
         raise ValueError("use a supported multi-turn loss mask: qwen, qwen3, qwen3_5")
 
@@ -67,8 +96,6 @@ def _sample(
             "metadata": source.metadata,
         }
     )
-    if example.metadata.get("tools"):
-        raise ValueError("tool definitions are unsupported for text SFT")
     tokens, mask = generator.get_loss_mask(_messages(example))
     if len(tokens) != len(mask):
         raise ValueError("token IDs and loss mask have different lengths")
