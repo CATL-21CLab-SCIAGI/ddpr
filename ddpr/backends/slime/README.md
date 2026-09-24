@@ -5,15 +5,7 @@ Install ddpr and your reward implementation in every worker's environment.
 
 ## Input and supervision
 
-Read ddsr-bench's `sft.jsonl` directly; no converted file is needed:
-
-```json
-{"id":"trial:1","prompt":[{"role":"user","content":"Question"}],"completion":[{"role":"assistant","content":"Answer"}],"metadata":{"benchmark":"cmphysbench"}}
-```
-
-Messages must be text-only system/user/assistant turns with exactly one assistant
-completion. Empty completion text is skipped and counted; malformed records and
-empty datasets raise errors. Tools and multimodal inputs are unsupported.
+Read ddsr-bench's `sft.jsonl` using the shared [input format](../../../README.md#input).
 
 SFT preserves history and supervises only the completion and template suffix.
 Its “rollout” prepares offline data, without generation or reward scoring.
@@ -64,7 +56,8 @@ export DDPR_ROLLOUT_GPUS_PER_ENGINE=2
 bash scripts/train/slime/qwen38_27b_rl.sh
 ```
 
-This uses separate training/generation GPUs on one node. Defaults are one update,
+This uses separate training/generation GPUs on one node. `DDPR_NUM_ROLLOUT` sets
+the total target (default one update). Other defaults are
 8 prompts, 4 responses per prompt and prompt/response limits of 4096/2048 tokens.
 Oversized prompts raise errors. Checkpoints are saved each update; SFT's resume
 settings also apply. These allocations are examples, not capacity guarantees.
@@ -73,13 +66,14 @@ settings also apply. These allocations are examples, not capacity guarantees.
 
 ```bash
 # Reuse model, data and GPU settings above; use fresh output directories.
+unset DDPR_REWARD  # Use the synthetic reward for the RL smoke job.
 DDPR_OUTPUT_DIR=data/smoke/slime/sft bash scripts/train/slime/qwen38_27b_sft_smoke.sh
 DDPR_OUTPUT_DIR=data/smoke/slime/rl bash scripts/train/slime/qwen38_27b_rl_smoke.sh
 ```
 
 Both wrap regular training, fixing one update, batch size 2 and a 2048-token
 sequence limit. RL uses one prompt and two responses capped at 16 tokens.
-Unset `DDPR_REWARD` to use its default synthetic `SmokeReward`.
+RL defaults to synthetic `SmokeReward`; set `DDPR_REWARD` to test your own class.
 Workload flags are fixed; optimizer, topology and trainable parameters are inherited.
 Full-model training remains the default.
 

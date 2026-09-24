@@ -52,7 +52,8 @@ def test_reward_loader_rejects_non_reward():
         load_reward("MissingModule")
 
 
-def test_backend_adapters_preserve_fields_and_order(monkeypatch):
+@pytest.mark.parametrize("with_ids", [True, False])
+def test_backend_adapters_preserve_fields_and_order(monkeypatch, with_ids):
     import asyncio
     from types import SimpleNamespace
 
@@ -72,7 +73,7 @@ def test_backend_adapters_preserve_fields_and_order(monkeypatch):
     fields = [
         {
             "response": "generated",
-            "sample_id": str(i),
+            "sample_id": str(i) if with_ids else None,
             "reference_completion": "teacher",
             "metadata": {"score": i},
         }

@@ -49,8 +49,8 @@ the check without installing, run `python scripts/envs/check.py <profile>`,
 where `<profile>` is `slime` or `swift`.
 
 A passing environment check still needs a training smoke test. See the
-[Slime](../ddpr/backends/slime/README.md#verification) and
-[Swift](../ddpr/backends/swift/README.md#verification) guides for commands and
+[Slime](../ddpr/backends/slime/README.md#sft-and-rl-smoke-launchers) and
+[Swift](../ddpr/backends/swift/README.md#sft-and-rl-smoke-launchers) guides for commands and
 validation results. The tested Swift image runs the LoRA training checks but
 still fails strict dependency and Git-provenance checks; see its guide.
 

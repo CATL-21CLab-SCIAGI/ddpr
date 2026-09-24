@@ -5,11 +5,8 @@ Install ddpr and your reward implementation in every worker's environment.
 
 ## Input and supervision
 
-Read ddsr-bench's `sft.jsonl` using the same
-[record format](../slime/README.md#input-and-supervision) as Slime. Swift requires
-text-only system/user/assistant messages, a final user prompt turn and exactly
-one assistant completion. Empty completion text is skipped; malformed records
-and empty datasets raise errors. Tools and multimodal inputs are unsupported.
+Read ddsr-bench's `sft.jsonl` using the shared [input format](../../../README.md#input).
+Swift requires a final user prompt turn for both SFT and RL.
 
 SFT preserves history with prompt loss disabled and supervises the completion
 plus template suffix. RL uses GRPO and exposes the teacher answer only as
@@ -55,6 +52,7 @@ oversized prompts from the left; choose enough space to preserve the problem.
 
 ```bash
 # Reuse model/data settings above; use fresh output directories.
+unset DDPR_REWARD  # Use the synthetic reward for the RL smoke job.
 DDPR_OUTPUT_DIR=data/smoke/swift/sft bash scripts/train/swift/qwen38_27b_sft_smoke.sh
 DDPR_OUTPUT_DIR=data/smoke/swift/rl bash scripts/train/swift/qwen38_27b_rl_smoke.sh
 ```
@@ -62,8 +60,12 @@ DDPR_OUTPUT_DIR=data/smoke/swift/rl bash scripts/train/swift/qwen38_27b_rl_smoke
 Both wrap regular training, fixing one update, a 2048-token limit and no checkpoint
 saving; arguments and logs remain. RL fixes two generations, a per-device batch
 of two, one accumulation step and a 16-token response cap. Capped responses remain
-eligible for learning. Unset `DDPR_REWARD` to use its default synthetic
-`SmokeReward`. Other training settings are inherited.
+eligible for learning. RL defaults to synthetic `SmokeReward`; set `DDPR_REWARD`
+to test your own class. Other training settings are inherited.
+
+Check `logging.jsonl` for completion of step 1 and training metrics. These wrappers
+do not assert weight changes or checkpoint persistence; the separate integration
+tests verify updates and SFT resume.
 
 ## Reward and launch integration
 

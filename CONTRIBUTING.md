@@ -78,7 +78,9 @@ Use the same conventions within each backend:
 - `scripts/train/<backend>/sft.sh` and `rl.sh`: sourceable argument fragments.
 - `<model>_<task>.sh`: standalone launchers; append `_smoke` for smoke jobs.
   Smoke scripts wrap the regular launcher and override only workload and checks.
-  Keep container requirements and hardware validation in the backend README.
+  Keep image tags and setup in `envs/README.md`, with validation scope in each
+  backend README. The root README presents both backends equally and owns the
+  shared input and reward contracts; backend guides own their launch commands.
 - `test_sft.py` and `test_rl.py`: task behavior; `test_masks.py`: token supervision;
   `test_integration.py`: installed-framework interfaces and opt-in training
   checks.
@@ -92,8 +94,9 @@ rollout hook to prepare supervised tokens.
 Do not add empty counterparts for unsupported tasks or interfaces.
 
 Before adding a backend feature, compare both directory trees and README
-headings together. Check SFT, SFT smoke and RL launchers, update every command
-and link affected by a rename, and keep differences limited to framework behavior.
+headings together. Check regular and smoke launchers for both SFT and RL, update
+every command and link affected by a rename, and keep differences limited to
+framework behavior.
 
 Keep data normalization independent of backend imports. Backends own training
 and optimization; ddpr adapts the exported data. Implement current requirements

@@ -64,6 +64,22 @@ def test_recomputation_arguments(launcher_env, task, granularity):
         assert args[args.index("--recompute-num-layers") + 1] == "1"
 
 
+@pytest.mark.parametrize("updates", [None, "7"])
+def test_rl_duration(launcher_env, updates):
+    launcher_env.pop("DDPR_NUM_ROLLOUT")
+    if updates is not None:
+        launcher_env["DDPR_NUM_ROLLOUT"] = updates
+    result = subprocess.run(
+        ["bash", str(ROOT / "scripts/train/slime/qwen38_27b_rl.sh")],
+        env=launcher_env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    args = result.stdout.splitlines()
+    assert args[args.index("--num-rollout") + 1] == (updates or "1")
+
+
 def _arguments(env, task, smoke=False):
     suffix = "_smoke" if smoke else ""
     result = subprocess.run(
