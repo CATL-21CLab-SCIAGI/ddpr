@@ -31,8 +31,6 @@ def load_sample(record: Mapping[str, Any]) -> SftSample:
     completion = _messages(record.get("completion"), "completion")
     if len(completion) != 1 or completion[0]["role"] != "assistant":
         raise ValueError("completion must contain exactly one assistant message")
-    if not completion[0]["content"].strip():
-        raise ValueError("completion content must not be empty")
     metadata = record.get("metadata")
     if metadata is not None and not isinstance(metadata, Mapping):
         raise TypeError("metadata must be an object")

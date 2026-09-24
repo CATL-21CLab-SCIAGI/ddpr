@@ -1,11 +1,45 @@
 import asyncio
 import json
+from copy import deepcopy
 
 import pytest
 
 pytest.importorskip("slime.rollout.data_source")
 
 from ddpr.backends.slime.plugin import RolloutDataSource
+
+
+@pytest.mark.parametrize("keep_valid", [True, False])
+def test_empty_references_are_skipped(args, record, caplog, keep_valid):
+    records = []
+    for content in ("", " \n\t"):
+        empty = deepcopy(record)
+        empty["completion"][0]["content"] = content
+        records.append(empty)
+    if keep_valid:
+        records.append(record)
+    with open(args.prompt_data, "w") as stream:
+        stream.writelines(json.dumps(row) + "\n" for row in records)
+    if keep_valid:
+        source = RolloutDataSource(args)
+        assert len(source.dataset) == 1
+        sample = source.get_samples(1)[0][0]
+        assert sample.sample_id == record["id"]
+        assert sample.reference_completion == record["completion"][0]["content"]
+    else:
+        with pytest.raises(ValueError, match="no usable RL samples"):
+            RolloutDataSource(args)
+    assert "skipped 2 empty RL references" in caplog.text
+
+
+@pytest.mark.parametrize("field,value", [("metadata", []), ("tools", ["tool"])])
+def test_empty_reference_does_not_hide_invalid_input(args, record, field, value):
+    record["completion"][0]["content"] = ""
+    record[field] = value
+    with open(args.prompt_data, "w") as stream:
+        stream.write(json.dumps(record) + "\n")
+    with pytest.raises(ValueError, match="sft.jsonl:1:"):
+        RolloutDataSource(args)
 
 
 def test_prompt_reference_and_isolation(args, record):

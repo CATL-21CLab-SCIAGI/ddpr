@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from argparse import Namespace
 from collections.abc import Mapping
 from copy import copy, deepcopy
@@ -16,6 +17,8 @@ from ddpr.backends.slime import data
 from ddpr.backends.slime.data import load_sample
 from ddpr.data.schemas import SftSample
 
+logger = logging.getLogger(__name__)
+
 
 def _messages(example: SftSample) -> list[dict[str, str | int]]:
     """Preserve context while supervising only the exported completion."""
@@ -24,8 +27,10 @@ def _messages(example: SftSample) -> list[dict[str, str | int]]:
     ]
 
 
-def _source(record: Mapping[str, Any]) -> Sample:
+def _source(record: Mapping[str, Any]) -> Sample | None:
     example = load_sample(record)
+    if not example.completion[0]["content"].strip():
+        return None
     sample = Sample(
         prompt=[dict(message) for message in example.prompt],
         label=[dict(message) for message in example.completion],
@@ -40,11 +45,20 @@ def load_samples(args: Namespace) -> list[Sample]:
     _validate_args(args, evaluation=False)
     source_path = Path(args.prompt_data).expanduser()
     samples = []
+    skipped = 0
     for line_number, record in data.read_records(source_path):
         try:
-            samples.append(_source(record))
+            sample = _source(record)
         except (TypeError, ValueError) as error:
             raise ValueError(f"{source_path}:{line_number}: {error}") from error
+        if sample is None:
+            skipped += 1
+        else:
+            samples.append(sample)
+    if skipped:
+        logger.warning("%s: skipped %d empty SFT completions", source_path, skipped)
+    if not samples:
+        raise ValueError(f"{source_path}: no usable SFT samples remain")
     if getattr(args, "dump_details", None) is not None:
         tokenizer = load_tokenizer(args.hf_checkpoint, trust_remote_code=True)
         tokenizer.save_pretrained(Path(args.dump_details) / "tokenizer")

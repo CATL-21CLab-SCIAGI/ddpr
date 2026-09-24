@@ -14,6 +14,144 @@ pytest.importorskip("slime")
 from ddpr.backends.slime.sft import generate_rollout
 
 
+def test_selective_recomputation_with_frozen_prefix():
+    if os.environ.get("DDPR_INSTALLED_SLIME") != "1":
+        pytest.skip("requires the Slime GPU container")
+    import torch
+    from megatron.core.tensor_parallel.random import checkpoint
+
+    if not torch.cuda.is_available():
+        pytest.skip("requires CUDA")
+    torch.manual_seed(0)
+    prefix = torch.nn.Linear(4, 4, device="cuda").requires_grad_(False)
+    projection = torch.nn.Linear(4, 4, device="cuda")
+    optimizer = torch.optim.Adam(projection.parameters(), lr=0.01)
+    inputs = prefix(torch.ones(2, 4, device="cuda"))
+    assert not inputs.requires_grad
+    before = projection.weight.detach().clone()
+    # Selective recomputation starts after the trainable projection, so the
+    # checkpoint has a gradient-enabled input even with a frozen prefix.
+    output = checkpoint(torch.sin, False, projection(inputs))
+    output.square().sum().backward()
+    assert projection.weight.grad is not None
+    assert torch.count_nonzero(projection.weight.grad) > 0
+    optimizer.step()
+    assert not torch.equal(before, projection.weight)
+    assert all(parameter.grad is None for parameter in prefix.parameters())
+
+
+def test_exported_rl_batch_and_rewards(exported_sft, args, monkeypatch, tmp_path):
+    from slime.rollout.rm_hub import batched_async_rm
+    from slime.utils.types import Sample
+    from transformers import AutoTokenizer
+
+    from ddpr.backends.slime import rl
+    from ddpr.backends.slime.plugin import RolloutDataSource
+
+    checkpoint = os.environ.get("DDPR_QWEN38_TOKENIZER")
+    if not checkpoint:
+        pytest.skip("set DDPR_QWEN38_TOKENIZER to local tokenizer files")
+    tokenizer = AutoTokenizer.from_pretrained(checkpoint, local_files_only=True)
+    monkeypatch.setattr(rl, "load_tokenizer", lambda *a, **kw: tokenizer)
+    path, records = exported_sft
+    args.prompt_data = str(path)
+    args.rollout_shuffle = False
+    args.rollout_max_prompt_len = 8192
+    source = RolloutDataSource(args)
+    records = [r for r in records if r["completion"][0]["content"].strip()]
+    groups = source.get_samples(len(records))
+    for group, record in zip(groups, records, strict=True):
+        expected = tokenizer.apply_chat_template(
+            record["prompt"], tokenize=False, add_generation_prompt=True
+        )
+        assert len(group) == args.n_samples_per_prompt
+        for sample in group:
+            assert sample.prompt == expected
+            assert sample.label is None
+            assert sample.sample_id == record["id"]
+            assert sample.reference_completion == record["completion"][0]["content"]
+            assert sample.metadata == record["metadata"]
+            assert Sample.from_dict(sample.to_dict()).to_dict() == sample.to_dict()
+            sample.response = "Fresh response"
+    (tmp_path / "reward_records.json").write_text(
+        json.dumps({r["id"]: r for r in records})
+    )
+    (tmp_path / "export_reward.py").write_text(
+        "import json\nfrom pathlib import Path\n"
+        "records = json.loads(Path(__file__).with_name('reward_records.json').read_text())\n"
+        "async def score(args, samples, **kwargs):\n"
+        "    for sample in samples:\n"
+        "        record = records[sample.sample_id]\n"
+        "        assert sample.metadata == record['metadata']\n"
+        "        assert sample.reference_completion == record['completion'][0]['content']\n"
+        "        assert sample.response == 'Fresh response'\n"
+        "        assert sample.label is None\n"
+        "    return [0.5] * len(samples)\n"
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    args.custom_rm_path = "export_reward.score"
+    samples = [sample for group in groups for sample in group]
+    assert asyncio.run(batched_async_rm(args, samples)) == [0.5] * len(samples)
+    source.save(0)
+    restored = RolloutDataSource(args)
+    restored.load(0)
+    assert [[s.to_dict() for s in g] for g in restored.get_samples(2)] == [
+        [s.to_dict() for s in g] for g in source.get_samples(2)
+    ]
+
+
+def test_exported_sft_batch(exported_sft, args):
+    from transformers import AutoTokenizer
+
+    from ddpr.backends.slime.plugin import RolloutDataSource
+
+    checkpoint = os.environ.get("DDPR_QWEN38_TOKENIZER")
+    if not checkpoint:
+        pytest.skip("set DDPR_QWEN38_TOKENIZER to local tokenizer files")
+    path, records = exported_sft
+    args.prompt_data = str(path)
+    args.hf_checkpoint = checkpoint
+    args.loss_type = "sft_loss"
+    args.n_samples_per_prompt = 1
+    args.compute_advantages_and_returns = False
+    args.apply_chat_template = False
+    args.loss_mask_type = "qwen3_5"
+    args.rollout_shuffle = False
+    source = RolloutDataSource(args)
+    records = [r for r in records if r["completion"][0]["content"].strip()]
+    args.rollout_batch_size = len(records)
+    args.seq_length = 8192
+    tokenizer = AutoTokenizer.from_pretrained(checkpoint, local_files_only=True)
+    batch = generate_rollout(args, 0, source)
+    assert len(batch) == len(records)
+    for group, record in zip(batch, records, strict=True):
+        sample = group[0]
+        assert sample.sample_id == record["id"]
+        assert sample.metadata == record["metadata"]
+        assert sample.prompt == record["prompt"]
+        assert sample.label == record["completion"]
+        assert sample.tokens == tokenizer.apply_chat_template(
+            record["prompt"] + record["completion"], tokenize=True, return_dict=False
+        )
+        supervised = tokenizer.decode(
+            [
+                token
+                for token, keep in zip(
+                    sample.tokens[-sample.response_length :],
+                    sample.loss_mask,
+                    strict=True,
+                )
+                if keep
+            ]
+        )
+        assert (
+            supervised
+            == "\n\n</think>\n\n"
+            + record["completion"][0]["content"].strip()
+            + "<|im_end|>\n"
+        )
+
+
 def test_native_rl_data_source(tmp_path, monkeypatch):
     data_source = pytest.importorskip("slime.rollout.data_source")
     from transformers import AutoTokenizer
@@ -203,6 +341,8 @@ def test_installed_slime_sft(tmp_path, history):
             "prompt",
             "--label-key",
             "completion",
+            "--tool-key",
+            "",
             "--loss-type",
             "sft_loss",
             "--n-samples-per-prompt",

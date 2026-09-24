@@ -4,10 +4,9 @@ from ddpr.backends.swift import rl, sft
 
 
 @pytest.mark.parametrize("preprocess", [sft.preprocess, rl.preprocess])
-def test_invalid_completion_is_not_silently_accepted(record, preprocess):
+def test_empty_completion_is_skipped(record, preprocess):
     record["completion"][0]["content"] = " "
-    with pytest.raises(ValueError, match="empty"):
-        preprocess(record)
+    assert preprocess(record) is None
 
 
 @pytest.mark.parametrize("preprocess", [sft.preprocess, rl.preprocess])

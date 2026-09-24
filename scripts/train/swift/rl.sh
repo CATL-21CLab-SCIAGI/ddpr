@@ -3,6 +3,11 @@
 # No processes are started by this file.
 export DDPR_SFT_DATA="${DDPR_SFT_DATA:?Set DDPR_SFT_DATA to the exported sft.jsonl}"
 DDPR_SWIFT_PLUGINS=("$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/../../../ddpr/backends/swift/plugin.py")
+if [[ -n "${DDPR_REWARD:-}" ]]; then
+    export DDPR_REWARD
+    DDPR_REWARD_PLUGIN="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/../../../ddpr/backends/swift/reward.py"
+    DDPR_REWARD_FUNCS=ddpr_reward
+fi
 if [[ -n "${DDPR_REWARD_PLUGIN:-}" ]]; then
     DDPR_SWIFT_PLUGINS+=("${DDPR_REWARD_PLUGIN}")
 fi

@@ -7,9 +7,11 @@ from typing import Any
 from ddpr.backends.swift.data import load_sample
 
 
-def preprocess(record: Mapping[str, Any]) -> dict[str, Any]:
-    """Prepare a policy prompt and reference fields for Swift reward plugins."""
+def preprocess(record: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Prepare an RL prompt and reference, skipping empty reference text."""
     example = load_sample(record)
+    if not example.completion[0]["content"].strip():
+        return None
     return {
         "messages": [dict(message) for message in example.prompt],
         "sample_id": example.id,

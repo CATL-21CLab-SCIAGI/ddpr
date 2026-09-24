@@ -17,9 +17,11 @@ def _messages(example: SftSample) -> list[dict[str, str | bool]]:
     return messages + [dict(message, loss=True) for message in example.completion]
 
 
-def preprocess(record: Mapping[str, Any]) -> dict[str, Any]:
-    """Prepare one offline SFT example through Swift's dataset interface."""
+def preprocess(record: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Prepare one offline SFT example, skipping empty completion text."""
     example = load_sample(record)
+    if not example.completion[0]["content"].strip():
+        return None
     return {
         "messages": _messages(example),
         "sample_id": example.id,

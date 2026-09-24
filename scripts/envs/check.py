@@ -12,8 +12,8 @@ from importlib.metadata import PackageNotFoundError, distribution, version
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-ROOT = Path(__file__).resolve().parents[1]
-CONFIG = ROOT / "configs/environments"
+ROOT = Path(__file__).resolve().parents[2]
+CONFIG = ROOT / "envs"
 
 
 def _revision(name: str) -> str:
@@ -50,7 +50,7 @@ def _dependencies(profile: str) -> list[str]:
     for line in result.stdout.splitlines():
         if line == "No broken requirements found.":
             continue
-        if profile == "dev" and line.startswith("slime "):
+        if profile == "cpu" and line.startswith("slime "):
             omitted.append(line)
         else:
             failures.append(line)
@@ -69,27 +69,32 @@ def check(profile: str) -> dict:
         "executable": sys.executable,
         "packages": {},
         "frameworks": {},
+        "warnings": [],
         "errors": [],
     }
     if sys.version_info < (3, 12):  # noqa: UP036 - also run before installing ddpr
         report["errors"].append("ddpr requires Python 3.12 or newer")
-    if profile == "dev" and sys.version_info[:2] != (3, 12):
-        report["errors"].append("the development profile requires Python 3.12")
+    if profile == "cpu" and sys.version_info[:2] != (3, 12):
+        report["errors"].append("the CPU development profile requires Python 3.12")
     names = (
         ["slime", "ms-swift"]
-        if profile == "dev"
+        if profile == "cpu"
         else ["slime" if profile == "slime" else "ms-swift"]
     )
     specs = json.loads((CONFIG / "frameworks.json").read_text())
     for name in names:
         try:
             revision = _revision(name)
-            allowed = {specs[name]["revision"]}
-            if profile == "slime":
-                allowed.add(specs[name]["gpu_revision"])
+            key = "cpu_revision" if profile == "cpu" else "gpu_revision"
+            expected = specs[name][key] if profile == "cpu" else specs[name].get(key)
             report["frameworks"][name] = revision
-            if revision not in allowed:
-                raise ValueError(f"{name}: unreviewed revision {revision}")
+            if expected is None:
+                report["warnings"].append(
+                    f"{name}: no tested GPU revision recorded; validate in the target "
+                    "container before recording gpu_revision"
+                )
+            elif revision != expected:
+                raise ValueError(f"{name}: expected {key} {expected}, found {revision}")
         except (
             PackageNotFoundError,
             ValueError,
@@ -108,8 +113,8 @@ def check(profile: str) -> dict:
             report["packages"][name] = version(name)
         except PackageNotFoundError as error:
             report["errors"].append(str(error))
-    if profile == "dev":
-        for line in (CONFIG / "dev.txt").read_text().splitlines():
+    if profile == "cpu":
+        for line in (CONFIG / "cpu/requirements.txt").read_text().splitlines():
             if not line or line.startswith("#"):
                 continue
             requirement, expected = line.split("==", 1)
@@ -133,10 +138,10 @@ def check(profile: str) -> dict:
             "build": torch.version.cuda,
             "available": torch.cuda.is_available(),
         }
-        if profile != "dev":
+        if profile != "cpu":
             if platform.system() != "Linux" or not torch.cuda.is_available():
                 raise ValueError(
-                    "GPU profiles require Linux and working CUDA; use dev locally"
+                    "GPU profiles require Linux and working CUDA; use cpu locally"
                 )
             # An actual kernel catches driver/runtime errors missed by imports.
             value = torch.ones(2, device="cuda")
@@ -147,9 +152,9 @@ def check(profile: str) -> dict:
         report["errors"].append(str(error))
 
     modules = ["ddpr.data.adapters.ddsr_bench"]
-    if profile in {"dev", "slime"}:
+    if profile in {"cpu", "slime"}:
         modules += ["ddpr.backends.slime.plugin", "slime.utils.mask_utils"]
-    if profile in {"dev", "swift"}:
+    if profile in {"cpu", "swift"}:
         modules += ["swift.dataset", "swift.template", "swift.rl_core.grpo_algorithm"]
     if profile == "slime" and report.get("cuda", {}).get("available"):
         modules += [
@@ -170,7 +175,7 @@ def check(profile: str) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("profile", choices=("dev", "slime", "swift"))
+    parser.add_argument("profile", choices=("cpu", "slime", "swift"))
     args = parser.parse_args()
     report = check(args.profile)
     print(json.dumps(report, indent=2))

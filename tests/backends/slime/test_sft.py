@@ -1,3 +1,4 @@
+import json
 from copy import deepcopy
 from types import SimpleNamespace
 
@@ -65,6 +66,40 @@ def arguments(**overrides):
             **overrides,
         }
     )
+
+
+@pytest.mark.parametrize("keep_valid", [True, False])
+def test_empty_completions_are_skipped_once_at_loading(tmp_path, caplog, keep_valid):
+    records = [example(), example()]
+    records[0]["completion"][0]["content"] = ""
+    records[1]["completion"][0]["content"] = " \n\t"
+    if keep_valid:
+        records.append(example())
+        records[-1]["id"] = "retained"
+    path = tmp_path / "sft.jsonl"
+    content = "".join(json.dumps(record) + "\n" for record in records)
+    path.write_text(content)
+    args = arguments(prompt_data=str(path))
+    if keep_valid:
+        samples = sft.load_samples(args)
+        assert len(samples) == 1
+        assert samples[0].sample_id == "retained"
+        assert samples[0].label == records[-1]["completion"]
+    else:
+        with pytest.raises(ValueError, match="no usable SFT samples"):
+            sft.load_samples(args)
+    assert "skipped 2 empty SFT completions" in caplog.text
+    assert path.read_text() == content
+
+
+def test_empty_completion_does_not_hide_invalid_metadata(tmp_path):
+    record = example()
+    record["completion"][0]["content"] = ""
+    record["metadata"] = []
+    path = tmp_path / "sft.jsonl"
+    path.write_text(json.dumps(record) + "\n")
+    with pytest.raises(ValueError, match="sft.jsonl:1: metadata"):
+        sft.load_samples(arguments(prompt_data=str(path)))
 
 
 def example(benchmark="critpt", history=False):

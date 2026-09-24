@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-DDPR_SLIME_ROOT="${DDPR_SLIME_ROOT:-/root/slime}"
+export DDPR_SLIME_ROOT="${DDPR_SLIME_ROOT:-/root/slime}"
 DDPR_MODEL="${DDPR_MODEL:-/mnt/model/Qwen/Qwen3.8-27B}"
 : "${DDPR_OUTPUT_DIR:?Set DDPR_OUTPUT_DIR to the checkpoint directory}"
 : "${DDPR_ACTOR_GPUS:?Set DDPR_ACTOR_GPUS for one-node training}"
@@ -16,8 +16,14 @@ export OMP_NUM_THREADS="${OMP_NUM_THREADS:-8}"
 source "${SCRIPT_DIR}/rl.sh"
 source "${DDPR_SLIME_ROOT}/scripts/models/qwen3.5-27B.sh"
 
+# Selective recomputation preserves gradients when the embedding/prefix is frozen.
+RECOMPUTE_ARGS=(--recompute-granularity "${DDPR_RECOMPUTE_GRANULARITY:-full}")
+if [[ "${DDPR_RECOMPUTE_GRANULARITY:-full}" == full ]]; then
+    RECOMPUTE_ARGS+=(--recompute-method uniform --recompute-num-layers 1)
+fi
+
 # Separate actor and generation GPUs; reassess memory on the target host.
-python "${DDPR_SLIME_ROOT}/train.py" \
+python -m ddpr.backends.slime.train \
     "${MODEL_ARGS[@]}" "${DDPR_RL_ARGS[@]}" \
     --hf-checkpoint "${DDPR_MODEL}" --load "${DDPR_LOAD:-${DDPR_MODEL}}" \
     --save "${DDPR_OUTPUT_DIR}" --save-interval 1 \
@@ -30,7 +36,7 @@ python "${DDPR_SLIME_ROOT}/train.py" \
     --rollout-max-prompt-len 4096 --rollout-max-response-len 2048 --seq-length 6144 \
     --tensor-model-parallel-size 1 --pipeline-model-parallel-size "${DDPR_ACTOR_GPUS}" \
     --context-parallel-size 1 \
-    --recompute-granularity full --recompute-method uniform --recompute-num-layers 1 \
+    "${RECOMPUTE_ARGS[@]}" \
     --optimizer adam --lr 1e-6 --lr-decay-style constant --weight-decay 0.1 \
     --adam-beta1 0.9 --adam-beta2 0.98 \
     --use-distributed-optimizer --use-precision-aware-optimizer \

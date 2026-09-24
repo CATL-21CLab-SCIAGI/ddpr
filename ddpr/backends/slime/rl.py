@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from argparse import Namespace
 from collections.abc import Mapping
 from copy import deepcopy
@@ -13,13 +14,17 @@ from transformers import PreTrainedTokenizerBase
 from ddpr.backends.slime import data
 from ddpr.backends.slime.data import load_sample
 
+logger = logging.getLogger(__name__)
+
 
 def _sample(
     record: Mapping[str, Any], tokenizer: PreTrainedTokenizerBase, args: Namespace
-) -> Sample:
+) -> Sample | None:
     example = load_sample(record)
     if example.prompt[-1]["role"] != "user":
         raise ValueError("RL prompts must end with a user message")
+    if not example.completion[0]["content"].strip():
+        return None
     prompt = tokenizer.apply_chat_template(
         list(example.prompt),
         tokenize=False,
@@ -70,11 +75,20 @@ def load_samples(args: Namespace) -> list[Sample]:
     tokenizer = load_tokenizer(args.hf_checkpoint, trust_remote_code=True)
     source_path = Path(args.prompt_data).expanduser()
     samples = []
+    skipped = 0
     for line_number, record in data.read_records(source_path):
         try:
-            samples.append(_sample(record, tokenizer=tokenizer, args=args))
+            sample = _sample(record, tokenizer=tokenizer, args=args)
         except (TypeError, ValueError) as error:
             raise ValueError(f"{source_path}:{line_number}: {error}") from error
+        if sample is None:
+            skipped += 1
+        else:
+            samples.append(sample)
+    if skipped:
+        logger.warning("%s: skipped %d empty RL references", source_path, skipped)
+    if not samples:
+        raise ValueError(f"{source_path}: no usable RL samples remain")
     if getattr(args, "dump_details", None) is not None:
         tokenizer.save_pretrained(Path(args.dump_details) / "tokenizer")
 

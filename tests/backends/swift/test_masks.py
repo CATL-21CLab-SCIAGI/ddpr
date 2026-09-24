@@ -39,10 +39,15 @@ def template():
     return template
 
 
-def test_qwen38_completion_labels(record, template):
+@pytest.mark.parametrize(
+    "completion",
+    ["ψ(x) = 0", "<think>\nApply the boundary condition.\n</think>\n\nψ(x) = 0"],
+)
+def test_qwen38_completion_labels(record, template, completion):
     from swift.template import MaxLengthError
 
     tokenizer = template.tokenizer
+    record["completion"][0]["content"] = completion
     row = sft.preprocess(record)
     encoded = template.encode(row)
     text = tokenizer.decode(encoded["input_ids"])
@@ -55,6 +60,30 @@ def test_qwen38_completion_labels(record, template):
     template.max_length = 1
     with pytest.raises(MaxLengthError):
         template.encode(row)
+
+
+def test_exported_sft_labels(exported_sft, template):
+    _, records = exported_sft
+    for record in records:
+        row = sft.preprocess(record)
+        if row is None:
+            continue
+        encoded = template.encode(row)
+        rendered = template.tokenizer.decode(encoded["input_ids"])
+        supervised = template.tokenizer.decode(
+            [v for v in encoded["labels"] if v != -100]
+        )
+        completion = record["completion"][0]["content"].strip()
+        # Swift recognizes inline thinking instead of prepending an empty block.
+        prefix = (
+            ""
+            if completion.startswith("<think>") and "</think>" in completion
+            else "<think>\n\n</think>\n\n"
+        )
+        assert supervised == prefix + completion + "<|im_end|>\n"
+        for message in record["prompt"]:
+            # Swift's official Qwen template strips surrounding whitespace.
+            assert message["content"].strip() in rendered
 
 
 @pytest.mark.parametrize("lazy", [False, True])
