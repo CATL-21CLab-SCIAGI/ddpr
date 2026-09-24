@@ -1,0 +1,13 @@
+# Direct dependencies for CPU development. GPU environments use upstream stacks.
+setuptools==84.0.0
+wheel==0.48.0
+pytest==9.1.1
+ruff==0.16.8
+torch==2.14.0
+transformers==5.12.1
+datasets==4.8.4
+trl==0.29.1
+peft==0.20.0
+msgspec==0.21.1
+pylatexenc==2.11
+ray[default]==2.58.0

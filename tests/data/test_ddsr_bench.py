@@ -60,12 +60,6 @@ def test_invalid_record_id():
         ),
         (
             [{"role": "user", "content": "q"}],
-            [{"role": "assistant", "content": " "}],
-            {},
-            "empty",
-        ),
-        (
-            [{"role": "user", "content": "q"}],
             [{"role": "assistant", "content": "a"}],
             [],
             "metadata",
@@ -75,3 +69,13 @@ def test_invalid_record_id():
 def test_invalid_fields(prompt, completion, metadata, match):
     with pytest.raises((TypeError, ValueError), match=match):
         load_sample({"prompt": prompt, "completion": completion, "metadata": metadata})
+
+
+def test_empty_text_is_preserved_for_task_specific_selection():
+    sample = load_sample(
+        {
+            "prompt": [{"role": "user", "content": "question"}],
+            "completion": [{"role": "assistant", "content": " \n"}],
+        }
+    )
+    assert sample.completion[0]["content"] == " \n"

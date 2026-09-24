@@ -1,10 +1,51 @@
+import json
 from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
 
+pytest.importorskip("slime")
+
 from ddpr.backends.slime import sft
 from ddpr.data.adapters.ddsr_bench import load_sample
+
+
+def test_source_preserves_ids_and_fills_small_dataset(args, record, monkeypatch):
+    pytest.importorskip("slime.rollout.data_source")
+    from slime.utils.types import Sample
+
+    from ddpr.backends.slime.plugin import RolloutDataSource
+
+    args.loss_type = "sft_loss"
+    args.n_samples_per_prompt = 1
+    args.compute_advantages_and_returns = False
+    args.apply_chat_template = False
+    args.loss_mask_type = "qwen3_5"
+    args.rollout_batch_size = 8
+    args.seq_length = 4096
+    monkeypatch.setattr(sft, "_mask_generator", lambda *a: CharacterMask())
+    source = RolloutDataSource(args)
+    batch = sft.generate_rollout(args, 0, source)
+    assert len(batch) == 8
+    assert [group[0].index for group in batch] == list(range(8))
+    for group in batch:
+        sample = group[0]
+        assert sample.sample_id == record["id"]
+        assert sample.prompt == record["prompt"]
+        assert sample.label == record["completion"]
+        assert sample.metadata == record["metadata"]
+        assert Sample.from_dict(sample.to_dict()).sample_id == record["id"]
+    batch[0][0].metadata["quality"]["verified"] = True
+    assert not batch[1][0].metadata["quality"]["verified"]
+    assert not source.dataset.samples[0].metadata["quality"]["verified"]
+
+    source.save(0)
+    restored = RolloutDataSource(args)
+    restored.load(0)
+    resumed = sft.generate_rollout(args, 1, restored)
+    assert len(resumed) == 8
+    assert [group[0].index for group in resumed] == list(range(8, 16))
+    assert all(group[0].sample_id == record["id"] for group in resumed)
 
 
 def arguments(**overrides):
@@ -13,6 +54,7 @@ def arguments(**overrides):
             "rollout_global_dataset": True,
             "input_key": "prompt",
             "label_key": "completion",
+            "metadata_key": "metadata",
             "loss_type": "sft_loss",
             "n_samples_per_prompt": 1,
             "compute_advantages_and_returns": False,
@@ -24,6 +66,40 @@ def arguments(**overrides):
             **overrides,
         }
     )
+
+
+@pytest.mark.parametrize("keep_valid", [True, False])
+def test_empty_completions_are_skipped_once_at_loading(tmp_path, caplog, keep_valid):
+    records = [example(), example()]
+    records[0]["completion"][0]["content"] = ""
+    records[1]["completion"][0]["content"] = " \n\t"
+    if keep_valid:
+        records.append(example())
+        records[-1]["id"] = "retained"
+    path = tmp_path / "sft.jsonl"
+    content = "".join(json.dumps(record) + "\n" for record in records)
+    path.write_text(content)
+    args = arguments(prompt_data=str(path))
+    if keep_valid:
+        samples = sft.load_samples(args)
+        assert len(samples) == 1
+        assert samples[0].sample_id == "retained"
+        assert samples[0].label == records[-1]["completion"]
+    else:
+        with pytest.raises(ValueError, match="no usable SFT samples"):
+            sft.load_samples(args)
+    assert "skipped 2 empty SFT completions" in caplog.text
+    assert path.read_text() == content
+
+
+def test_empty_completion_does_not_hide_invalid_metadata(tmp_path):
+    record = example()
+    record["completion"][0]["content"] = ""
+    record["metadata"] = []
+    path = tmp_path / "sft.jsonl"
+    path.write_text(json.dumps(record) + "\n")
+    with pytest.raises(ValueError, match="sft.jsonl:1: metadata"):
+        sft.load_samples(arguments(prompt_data=str(path)))
 
 
 def example(benchmark="critpt", history=False):
@@ -102,6 +178,9 @@ def test_message_masks_override_input_flags():
         {"apply_chat_template": True},
         {"label_key": None},
         {"input_key": "messages"},
+        {"metadata_key": "other_metadata"},
+        {"apply_chat_template_kwargs": {"enable_thinking": False}},
+        {"tool_key": "tools"},
         {"n_samples_per_prompt": 2},
         {"loss_type": "policy_loss"},
         {"rollout_global_dataset": False},
@@ -110,7 +189,7 @@ def test_message_masks_override_input_flags():
         {"multimodal_keys": {"image": "image"}},
     ],
 )
-def test_invalid_configuration_fails_before_loading_slime(override):
+def test_invalid_configuration_fails_before_loading_tokenizer(override):
     with pytest.raises(ValueError):
         sft.generate_rollout(arguments(**override), 0, Buffer([]))
 

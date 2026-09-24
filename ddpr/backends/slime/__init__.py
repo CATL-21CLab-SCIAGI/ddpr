@@ -1,1 +1,1 @@
-"""Slime integration; imports remain optional outside training."""
+"""Slime integration; backend modules require an installed Slime package."""
