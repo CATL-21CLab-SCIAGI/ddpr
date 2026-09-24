@@ -3,7 +3,8 @@
 Training for data-driven physics reasoning.
 
 ddpr adapts ddsr-bench's `sft.jsonl` in memory for supervised fine-tuning (SFT)
-with Slime or MS-Swift, preserving context and supervising only the completion.
+and reinforcement learning (RL) with Slime or MS-Swift. SFT supervises only the
+completion; RL generates new responses and passes teacher references to rewards.
 Both backends have passed Qwen3.8-27B SFT and RL (GRPO) optimizer-update checks
 on H20: Slime with selected decoder layers trainable, and Swift with LoRA.
 RL checks use synthetic rewards; the physics reward is not yet defined.
@@ -17,55 +18,88 @@ Use Python 3.12 or newer. From this project's root:
 python -m pip install -e .
 ```
 
-Install the chosen training framework and its model dependencies separately
-using its own instructions. ddpr does not depend on ddsr-bench's Python package, and does
-not install the similarly named PyPI package `slime`.
+Install the chosen training framework and its model dependencies separately.
+ddpr does not depend on ddsr-bench's Python package or install training frameworks.
+The similarly named PyPI package `slime` is not the training framework.
 
-See the [Slime SFT/RL guide](ddpr/backends/slime/README.md) or
-[Swift SFT/RL guide](ddpr/backends/swift/README.md) for training setup.
 Use the [image table and DSW/DLC setup guide](envs/README.md#images-by-gpu)
 to select the custom image and verify the installed frameworks before training.
-For Slime SFT with configurable duration and checkpoints, use the
-[SFT launcher](ddpr/backends/slime/README.md#sft-launcher).
 
-## Run the SFT smoke job
+## Training
 
-From the project root on a DSW instance using the Slime image:
+Choose a backend, provide the model and exported data, then run its SFT or RL
+launcher. Start with a smoke job to check integration on your container and GPUs.
+Smoke jobs inherit the regular training settings with a smaller workload.
 
-```bash
-python scripts/envs/setup.py slime
-export DDPR_MODEL=/path/to/Qwen3.8-27B
-export DDPR_SFT_DATA=/path/to/sft.jsonl
-export DDPR_ACTOR_GPUS=4
-export DDPR_OUTPUT_DIR=/path/to/fresh/smoke-output
-bash scripts/train/slime/qwen38_27b_sft_smoke.sh
+| Backend | Training | Smoke checks |
+| --- | --- | --- |
+| Slime | [SFT](ddpr/backends/slime/README.md#sft-launcher), [RL](ddpr/backends/slime/README.md#rl-launcher) | [SFT and RL](ddpr/backends/slime/README.md#sft-and-rl-smoke-launchers) |
+| MS-Swift | [SFT](ddpr/backends/swift/README.md#sft-launcher), [RL](ddpr/backends/swift/README.md#rl-launcher) | [SFT and RL](ddpr/backends/swift/README.md#sft-and-rl-smoke-launchers) |
+
+## Input
+
+Both backends read the same JSONL export without a converted file:
+
+```json
+{"id":"trial:1","prompt":[{"role":"user","content":"Question"}],"completion":[{"role":"assistant","content":"Answer"}],"metadata":{"benchmark":"cmphysbench"}}
 ```
 
-This reuses the regular SFT configuration for one update on two samples, saves
-a checkpoint, and checks per-rank gradients and sampled weight changes.
-See the [Slime smoke guide](ddpr/backends/slime/README.md#sft-and-rl-smoke-launchers)
-for RL, configuration and verification limits.
+Use text-only system/user/assistant messages and exactly one assistant completion.
+Empty completion text is skipped in SFT and RL; malformed records and empty
+datasets raise errors. Tools and multimodal inputs are unsupported. `id` and
+`metadata` are optional; adapters preserve them as `sample_id` and metadata.
+Backend guides describe prompt-turn constraints and token limits.
 
 ## Reward contract
 
-Select the same reward class for either backend:
+SFT does not call a reward. For ordinary RL, supply a shared reward class or a
+native backend hook. Both RL smoke launchers default to
+[`SmokeReward`](ddpr/rewards/smoke.py), which assigns synthetic text-hash scores;
+it does not evaluate physics. Identical responses receive identical scores and
+may produce zero advantages.
 
-```bash
-export DDPR_REWARD=ddpr.rewards.SmokeReward
-# Or: export DDPR_REWARD=my_package.rewards.PhysicsReward
+To implement a shared reward, subclass [`Reward`](ddpr/rewards/base.py). For
+example, put this toy formatting check in `my_rewards.py` and supply a nonempty
+`metadata.required_suffix` in each input record:
+
+```python
+from collections.abc import Mapping
+from typing import Any
+
+from ddpr.rewards import Reward
+
+
+class FormatReward(Reward):
+    def __call__(
+        self,
+        *,
+        response: str,
+        sample_id: str | None,
+        reference_completion: str,
+        metadata: Mapping[str, Any],
+    ) -> float:
+        return float(response.rstrip().endswith(metadata["required_suffix"]))
 ```
 
-Both RL smoke wrappers default to [`SmokeReward`](ddpr/rewards/smoke.py), a small
-`Reward` implementation assigning deterministic text-hash scores. It is purely
-synthetic: it does not evaluate physics or compare against teacher answers.
-Identical responses receive identical scores and may produce zero advantages.
+For `{"required_suffix": "END"}`, a response ending in `END` scores 1; others
+score 0. This checks formatting only. `response` is the newly generated text;
+`sample_id` is the exported ID or `None`, and `reference_completion` is the
+unverified teacher answer, unused in this example. Return a finite scalar with
+higher scores meaning better responses. Let verifier failures surface rather
+than silently converting them to correctness scores.
 
-Implement `Reward.__call__` with generated text, sample ID, metadata and the
-unverified teacher completion; return a finite scalar, higher being better.
-The class must be importable on every worker and constructible without arguments.
-Slime and Swift adapters handle invocation and preserve response order.
-`DDPR_REWARD` takes precedence over native backend reward settings; unset it
-to use native hooks. Concrete physics verification remains to be defined.
+Make the module importable on every worker (for example, install your package),
+then select the same class before either backend's RL launcher:
+
+```bash
+export DDPR_REWARD=my_rewards.FormatReward
+```
+
+Classes must be constructible without arguments and are cached per process.
+Slime and Swift adapters pass the fields above and preserve response order.
+`DDPR_REWARD` overrides native reward settings, including in smoke jobs; unset it
+to use native hooks in regular RL or the default synthetic reward in smoke jobs.
+Concrete physics verification remains to be defined.
 
 ## Future work
 

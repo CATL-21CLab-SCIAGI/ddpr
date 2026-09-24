@@ -13,7 +13,7 @@ class Reward(ABC):
         self,
         *,
         response: str,
-        sample_id: str,
+        sample_id: str | None,
         reference_completion: str,
         metadata: Mapping[str, Any],
     ) -> float:

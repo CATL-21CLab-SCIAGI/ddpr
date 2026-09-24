@@ -31,7 +31,7 @@ python -m ddpr.backends.slime.train \
     --rollout-num-gpus "${DDPR_ROLLOUT_GPUS}" \
     --rollout-num-gpus-per-engine "${DDPR_ROLLOUT_GPUS_PER_ENGINE}" \
     --num-gpus-per-node "$((DDPR_ACTOR_GPUS + DDPR_ROLLOUT_GPUS))" \
-    --num-rollout 1 --rollout-batch-size 8 --n-samples-per-prompt 4 \
+    --num-rollout "${DDPR_NUM_ROLLOUT:-1}" --rollout-batch-size 8 --n-samples-per-prompt 4 \
     --global-batch-size 32 --micro-batch-size 1 \
     --rollout-max-prompt-len 4096 --rollout-max-response-len 2048 --seq-length 6144 \
     --tensor-model-parallel-size 1 --pipeline-model-parallel-size "${DDPR_ACTOR_GPUS}" \
