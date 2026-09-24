@@ -12,9 +12,13 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.8"]
+physics = ["pydantic>=2.10", "sympy>=1.13"]
 
 [tool.setuptools.packages.find]
 include = ["ddpr*"]
+
+[tool.setuptools.package-data]
+"ddpr.rewards.physics._core" = ["LICENSE", "UPSTREAM.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -23,3 +27,10 @@ addopts = ["--import-mode=importlib"]
 [tool.ruff]
 line-length = 88
 target-version = "py312"
+
+[tool.ruff.lint.per-file-ignores]
+# Preserve the upstream snapshot's exception classification and sandbox behavior.
+"ddpr/rewards/physics/_core/*.py" = [
+  "BLE001", "C408", "FURB136", "S102", "S110", "SIM101", "SIM102",
+  "SIM114", "SIM117", "TRY004", "TRY201", "UP037", "UP041",
+]
