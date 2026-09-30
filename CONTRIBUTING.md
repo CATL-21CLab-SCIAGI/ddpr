@@ -106,10 +106,37 @@ keep `ddpr/data` independent of training frameworks.
 
 ## Coding conventions
 
-Physics grading keeps rules, LLM assessments, execution and transport separate;
-the DDPR reward maps assessments to training scores. Keep this implementation
-independent of consensus. DDSR-Bench input/output adapters and client integration
-are deferred until integration; do not introduce speculative shared interfaces.
+Physics grading keeps rules, LLM assessments, execution and model clients separate;
+the DDPR reward maps assessments to training scores. `llm/clients/` owns provider
+calls and configuration; `llm/` owns assessment prompts and policy. Keep this
+implementation independent of consensus. `critpt_ai/` owns native Auto/Freestyle problem formats,
+parsing and report formatting; it is an I/O adapter, not the grading engine.
+Root `grader.py` owns orchestration. Root `schemas.py` holds shared grading plans,
+precision, assessment and completion types. `answer.py`, `validation.py` and
+`runtime.py` own shared answer processing, checks and deadlines. Classify code
+by its responsibility and consumers, not its upstream origin: grading plans and
+the `answer()` convention are not CritPt-AI-specific. Judges consume shared types
+or explicit public/reference data, not native problem models. The public
+`grade_response` entry point and reward loader retain the native I/O boundary.
+DDSR-Bench input/output adapters and client integration are deferred until integration; do not introduce speculative shared interfaces.
+
+For folder reviews, compare the actual sibling `ddsr_bench/grading/` layout and
+review responsibilities and dependencies together, not just individual names.
+Use `utils.py` for shared helpers. Keep rule interfaces consistent:
+`grade_exact_numeric`, `grade_floating_numeric`, `grade_symbolic` and
+`grade_categorical` take `(answer, target, **kwargs)`. Serialized plan fields
+remain unchanged; dispatch unpacks `args`. Numerical cross-checks provide
+evidence rather than grades. Invalid references, configuration and internal
+failures must not become incorrect-answer rewards.
+
+Execution helpers use `grading_plan`, `fn` for a callable, `extract_fn` for the extraction
+callback, and `timeout` in seconds. Keep related getters and constants aligned
+(`grader_timeout`, `DEFAULT_GRADER_TIMEOUT`); document units separately.
+AST expressions use `node`, not callable names.
+
+Scope renames to owned symbols; preserve library attributes such as SymPy `.args`.
+Exercise affected paths with regression tests, including error behavior, rather
+than relying only on a previously passing suite.
 
 Follow the sibling ddsr-bench project's style and compare related code before
 introducing patterns or renaming APIs.

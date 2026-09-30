@@ -1,40 +1,30 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
 
-from ..schemas import (
-    FreestyleProblemGradingInput,
-    SemanticJudgment,
-)
-from ..transport.client import complete_judge
-from ..transport.config import (
+from ..schemas import SemanticJudgment, SemanticResponse
+from .clients.client import complete_judge
+from .clients.config import (
+    ClientConfig,
     Completion,
-    JudgeBackendConfig,
-    transport_from_env,
+    client_from_env,
 )
-from .parsing import extract_json_object, normalize_result
+from .utils import extract_json_object, normalize_result
+
+SEMANTIC_ENV_PREFIX = "AUTO_CRITPT_GRADER_SEMANTIC_JUDGE"
 
 
-class SemanticJudgeConfig(JudgeBackendConfig):
+class SemanticJudgeConfig(ClientConfig):
     max_tokens: int = Field(default=32000, ge=1, le=64000)
-    timeout_seconds: float = Field(default=1800.0, gt=0.0)
+    timeout_seconds: float = Field(default=1800.0, gt=0.0, allow_inf_nan=False)
 
     @classmethod
     def from_env(cls) -> "SemanticJudgeConfig":
-        return cls(**transport_from_env("AUTO_CRITPT_GRADER_SEMANTIC_JUDGE"))
-
-
-class _JudgeResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    verdict: str
-    confidence: float = Field(ge=0.0, le=1.0)
-    solver_answer_summary: str = Field(min_length=1)
-    assessment: str = Field(min_length=1)
-    substantive_errors: list[str] = Field(default_factory=list)
+        return cls(**client_from_env(SEMANTIC_ENV_PREFIX))
 
 
 class LLMSemanticJudge:
@@ -49,15 +39,28 @@ class LLMSemanticJudge:
 
     def judge(
         self,
-        problem: FreestyleProblemGradingInput,
-        response: str,
+        answer: str,
         *,
+        public_problem: Mapping[str, Any],
+        reference_answer: str,
+        reference_solution: str,
         attempt_id: str = "saved-response",
     ) -> SemanticJudgment:
-        if not response.strip():
+        """Assess an answer against reference text.
+
+        public_problem supplies public task fields, including answer_type and
+        answer_items; native format normalization belongs to the caller.
+        """
+        if not answer.strip():
             raise ValueError("SemanticJudge requires a completed Solver response")
 
-        messages = build_semantic_judge_prompt(problem, response, attempt_id=attempt_id)
+        messages = _messages(
+            answer,
+            public_problem=public_problem,
+            reference_answer=reference_answer,
+            reference_solution=reference_solution,
+            attempt_id=attempt_id,
+        )
         current_messages = messages
         complete = self._completion or complete_judge
         last_error: Exception | None = None
@@ -68,14 +71,8 @@ class LLMSemanticJudge:
                     result.content or "",
                     source="SemanticJudge response",
                 )
-                parsed_response = _JudgeResponse.model_validate(payload)
-                if parsed_response.verdict not in {
-                    "correct",
-                    "incorrect",
-                    "uncertain",
-                }:
-                    raise ValueError("verdict must be correct, incorrect, or uncertain")
-            except Exception as exc:
+                parsed_response = SemanticResponse.model_validate(payload)
+            except (ValueError, TypeError) as exc:
                 last_error = exc
                 if schema_attempt == 2:
                     break
@@ -93,12 +90,8 @@ class LLMSemanticJudge:
                 continue
 
             return SemanticJudgment(
+                **parsed_response.model_dump(),
                 attempt_id=attempt_id,
-                verdict=parsed_response.verdict,
-                confidence=parsed_response.confidence,
-                solver_answer_summary=parsed_response.solver_answer_summary,
-                assessment=parsed_response.assessment,
-                substantive_errors=parsed_response.substantive_errors,
                 model=result.model or self.config.model,
                 raw_response=result.content or "",
                 response_id=result.response_id,
@@ -111,10 +104,12 @@ class LLMSemanticJudge:
         )
 
 
-def build_semantic_judge_prompt(
-    problem: FreestyleProblemGradingInput,
-    response: str,
+def _messages(
+    answer: str,
     *,
+    public_problem: Mapping[str, Any],
+    reference_answer: str,
+    reference_solution: str,
     attempt_id: str = "saved-response",
 ) -> list[dict[str, str]]:
     system = """You are Freestyle_CritPt SemanticJudge.
@@ -142,16 +137,16 @@ demand a machine-oriented answer serialization.
 Return one JSON object only with verdict, confidence, solver_answer_summary,
 assessment, and substantive_errors."""
     payload: dict[str, Any] = {
-        "public_task": problem.public_view(),
-        "semantic_answer_type": problem.answer_type,
-        "answer_items": [item.model_dump(mode="json") for item in problem.answer_items],
+        "public_task": dict(public_problem),
+        "semantic_answer_type": public_problem["answer_type"],
+        "answer_items": public_problem["answer_items"],
         "private_reference": {
-            "reference_answer": problem.reference_answer,
-            "reference_solution": problem.reference_solution,
+            "reference_answer": reference_answer,
+            "reference_solution": reference_solution,
         },
         "solver_attempt": {
             "attempt_id": attempt_id,
-            "response": response,
+            "response": answer,
         },
         "response_schema": {
             "verdict": "correct | incorrect | uncertain",

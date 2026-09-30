@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import multiprocessing
 import os
 import signal
@@ -7,10 +8,7 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
-from ..schemas import GradingPlan
-from .answers import extract_gradeable_answer
-
-DEFAULT_GRADER_TIMEOUT_SECONDS = 120.0
+DEFAULT_GRADER_TIMEOUT = 120.0  # Seconds.
 
 
 class GraderTimeout(BaseException):
@@ -21,31 +19,21 @@ class AnswerExtractionError(ValueError):
     pass
 
 
-def grader_timeout_seconds() -> float:
+def grader_timeout() -> float:
+    """Read the configured grading timeout in seconds."""
     seconds = float(
-        os.getenv(
-            "AUTO_CRITPT_GRADER_TIMEOUT_SECONDS", str(DEFAULT_GRADER_TIMEOUT_SECONDS)
-        )
+        os.getenv("AUTO_CRITPT_GRADER_TIMEOUT_SECONDS", str(DEFAULT_GRADER_TIMEOUT))
     )
-    if seconds <= 0:
-        raise ValueError("AUTO_CRITPT_GRADER_TIMEOUT_SECONDS must be positive")
+    if not math.isfinite(seconds) or seconds <= 0:
+        raise ValueError(
+            "AUTO_CRITPT_GRADER_TIMEOUT_SECONDS must be finite and positive"
+        )
     return seconds
 
 
-def extract_answer_locally(
-    response: str,
-    plan: GradingPlan,
-    extract: Callable[..., dict[str, Any]] = extract_gradeable_answer,
-) -> dict[str, Any]:
+def _worker(sender: Any, fn: Callable[..., Any], args: tuple[Any, ...]) -> None:
     try:
-        return extract(response, grading_plan=plan)
-    except ValueError as exc:
-        raise AnswerExtractionError(str(exc)) from exc
-
-
-def _worker(sender: Any, function: Callable[..., Any], args: tuple[Any, ...]) -> None:
-    try:
-        sender.send(("success", function(*args)))
+        sender.send(("success", fn(*args)))
     except BaseException as exc:
         kind = "extraction_error" if isinstance(exc, AnswerExtractionError) else "error"
         sender.send((kind, str(exc)))
@@ -54,12 +42,14 @@ def _worker(sender: Any, function: Callable[..., Any], args: tuple[Any, ...]) ->
 
 
 def run_with_deadline(
-    function: Callable[..., Any],
+    fn: Callable[..., Any],
     *args: Any,
-    timeout_seconds: float | None = None,
+    timeout: float | None = None,
 ) -> Any:
-    """Bound extraction and comparison, including calls from worker threads."""
-    seconds = grader_timeout_seconds() if timeout_seconds is None else timeout_seconds
+    """Run ``fn`` within ``timeout`` seconds, including from worker threads."""
+    seconds = grader_timeout() if timeout is None else timeout
+    if not math.isfinite(seconds):
+        raise ValueError("timeout must be finite")
     if seconds <= 0:
         raise GraderTimeout
     use_alarm = (
@@ -75,18 +65,20 @@ def run_with_deadline(
             raise GraderTimeout
 
         signal.signal(signal.SIGALRM, expire)
-        signal.setitimer(signal.ITIMER_REAL, seconds)
         try:
-            return function(*args)
+            signal.setitimer(signal.ITIMER_REAL, seconds)
+            return fn(*args)
         finally:
-            signal.setitimer(signal.ITIMER_REAL, 0)
-            signal.signal(signal.SIGALRM, previous)
+            try:
+                signal.setitimer(signal.ITIMER_REAL, 0)
+            finally:
+                signal.signal(signal.SIGALRM, previous)
 
     context = multiprocessing.get_context("spawn")
     receiver, sender = context.Pipe(duplex=False)
     process = context.Process(
         target=_worker,
-        args=(sender, function, args),
+        args=(sender, fn, args),
         daemon=True,
     )
     started = False

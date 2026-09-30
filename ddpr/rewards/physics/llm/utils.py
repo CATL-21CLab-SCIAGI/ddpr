@@ -7,12 +7,7 @@ from typing import Any
 from ..schemas import CompletionResult
 
 _JSON_FENCE = re.compile(
-    r"```json\s*(.*?)\s*```",
-    flags=re.IGNORECASE | re.DOTALL,
-)
-_OUTER_JSON_FENCE = re.compile(
-    r"\A```json\s*(.*)\s*```\Z",
-    flags=re.IGNORECASE | re.DOTALL,
+    r"^[ \t]*```(?:json)?[ \t]*$", flags=re.IGNORECASE | re.MULTILINE
 )
 
 
@@ -21,48 +16,34 @@ def extract_json_object(
     *,
     source: str = "LLM response",
 ) -> dict[str, Any]:
-    """Extract one JSON object from plain, fenced, or narrated model output."""
-
-    outer_fence = _OUTER_JSON_FENCE.fullmatch(content.strip())
-    if outer_fence is not None:
-        data = _loads_json(outer_fence.group(1))
-        if not isinstance(data, dict):
-            raise TypeError(f"{source} JSON must be an object.")
-        return _normalize_generated_text_controls(data)
-
+    """Read one unambiguous JSON object, allowing fences and surrounding prose."""
+    content = _JSON_FENCE.sub("", content).strip()
     try:
         data = _loads_json(content)
-    except json.JSONDecodeError as initial_error:
-        fenced_error: json.JSONDecodeError | None = None
-        found_fence = False
-        for match in _JSON_FENCE.finditer(content):
-            found_fence = True
-            try:
-                data = _loads_json(match.group(1))
-            except json.JSONDecodeError as error:
-                fenced_error = error
-                continue
-            if isinstance(data, dict):
-                return _normalize_generated_text_controls(data)
-
-        if found_fence:
-            raise fenced_error or initial_error
-
-        decoder = json.JSONDecoder()
-        cleaned_content = _strip_trailing_commas(content)
-        for index, character in enumerate(cleaned_content):
-            if character != "{":
-                continue
-            try:
-                data, _ = decoder.raw_decode(cleaned_content[index:])
-            except json.JSONDecodeError:
-                continue
-            if isinstance(data, dict):
-                return _normalize_generated_text_controls(data)
-        raise initial_error
+    except json.JSONDecodeError:
+        decoder = json.JSONDecoder(object_pairs_hook=_unique_object)
+        cleaned = _escape_control_characters_in_strings(_strip_trailing_commas(content))
+        objects = []
+        position = 0
+        while (start := cleaned.find("{", position)) != -1:
+            data, end = decoder.raw_decode(cleaned, start)
+            objects.append(data)
+            position = end
+        if len(objects) != 1:
+            raise ValueError(f"{source} must contain exactly one JSON object") from None
+        data = objects[0]
     if not isinstance(data, dict):
         raise TypeError(f"{source} JSON must be an object.")
     return _normalize_generated_text_controls(data)
+
+
+def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"Duplicate JSON key: {key!r}")
+        result[key] = value
+    return result
 
 
 def _normalize_generated_text_controls(value: Any) -> Any:
@@ -88,18 +69,18 @@ def _normalize_generated_text_controls(value: Any) -> Any:
 
 def _loads_json(content: str) -> Any:
     try:
-        return json.loads(content)
+        return json.loads(content, object_pairs_hook=_unique_object)
     except json.JSONDecodeError as initial_error:
         cleaned = _strip_trailing_commas(content)
         if cleaned != content:
             try:
-                return json.loads(cleaned)
+                return json.loads(cleaned, object_pairs_hook=_unique_object)
             except json.JSONDecodeError:
                 pass
 
         repaired = _escape_control_characters_in_strings(cleaned)
         if repaired != cleaned:
-            return json.loads(repaired)
+            return json.loads(repaired, object_pairs_hook=_unique_object)
         raise initial_error
 
 

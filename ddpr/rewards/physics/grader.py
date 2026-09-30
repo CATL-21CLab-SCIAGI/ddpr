@@ -2,40 +2,42 @@
 
 from __future__ import annotations
 
-import hashlib
+import math
 import os
 import time
 from collections.abc import Mapping
 from typing import Any
 
-from .execution.answers import extract_gradeable_answer
-from .execution.runtime import (
-    AnswerExtractionError,
-    extract_answer_locally,
-    grader_timeout_seconds,
-    run_with_deadline,
-)
-from .execution.runtime import (
-    GraderTimeout as _GraderTimeout,
-)
-from .inputs import parse_grading_problem
-from .llm.equivalence import (
-    EquivalenceJudge,
-    ExpressionEquivalenceJudge,
-)
-from .llm.semantic import LLMSemanticJudge
-from .rule.numeric import compare_exact_numerically
-from .rule.plan import compose_grades, grade_with_plan
-from .schemas import (
-    EquivalenceJudgment,
-    ExactNumericComparison,
+from .answer import extract_answer_locally, extract_gradeable_answer
+from .critpt_ai.inputs import parse_grading_problem
+from .critpt_ai.outputs import format_report
+from .critpt_ai.schemas import (
     FreestyleProblemGradingInput,
     GradeReport,
     GradingInput,
-    PrimitiveGrade,
     ProblemGradingInput,
+)
+from .llm.equivalence import (
+    EquivalenceJudge,
+    LLMEquivalenceJudge,
+)
+from .llm.semantic import LLMSemanticJudge
+from .rule.compare import compose_grades, grade_with_plan
+from .rule.numeric import evaluate_numeric_agreement
+from .runtime import (
+    AnswerExtractionError,
+    GraderTimeout,
+    grader_timeout,
+    run_with_deadline,
+)
+from .schemas import (
+    EquivalenceJudgment,
+    ExactNumericComparison,
+    PrimitiveGrade,
     UnexecutedAnswer,
 )
+
+DEFAULT_NUMERIC_CHECK_TIMEOUT = 30.0  # Seconds.
 
 
 def grade_response(
@@ -69,49 +71,47 @@ def grade_response(
             semantic_judge=semantic_judge,
             attempt_id=attempt_id,
         )
-    response_hash = hashlib.sha256(response.encode("utf-8")).hexdigest()
     extracted_answer = None
     try:
-        deadline = time.monotonic() + grader_timeout_seconds()
+        deadline = time.monotonic() + grader_timeout()
         extracted_answer = run_with_deadline(
             extract_answer_locally,
             response,
             selected_problem.grading_plan,
             extract_gradeable_answer,
-            timeout_seconds=deadline - time.monotonic(),
+            timeout=deadline - time.monotonic(),
         )
         deterministic = run_with_deadline(
             grade_with_plan,
             extracted_answer,
             selected_problem.grading_plan,
-            timeout_seconds=deadline - time.monotonic(),
+            timeout=deadline - time.monotonic(),
         )
     except AnswerExtractionError as exc:
-        return GradeReport(
-            problem_id=selected_problem.problem_id,
-            answer_type=selected_problem.answer_contract.answer_type,
-            raw_response=response,
-            response_sha256=response_hash,
+        return format_report(
+            selected_problem,
+            response,
             extraction_status=_classify_extraction_error(str(exc)),
             grading_status="not_graded",
             passed=False,
             error_message=str(exc),
         )
 
-    except _GraderTimeout:
-        plan = selected_problem.grading_plan
+    except GraderTimeout:
+        grading_plan = selected_problem.grading_plan
         if (
             extracted_answer is None
             or not judge_enabled
-            or any(call.primitive not in {"exact", "symbolic"} for call in plan.calls)
-            or any(call.target not in extracted_answer for call in plan.calls)
+            or any(
+                call.primitive not in {"exact", "symbolic"}
+                for call in grading_plan.calls
+            )
+            or any(call.target not in extracted_answer for call in grading_plan.calls)
         ):
-            return GradeReport(
-                problem_id=selected_problem.problem_id,
-                answer_type=selected_problem.answer_type,
-                raw_response=response,
-                response_sha256=response_hash,
-                extracted_answer=_json_safe(extracted_answer),
+            return format_report(
+                selected_problem,
+                response,
+                extracted_answer=extracted_answer,
                 extraction_status="success"
                 if extracted_answer is not None
                 else "not_attempted",
@@ -120,7 +120,7 @@ def grade_response(
                 error_message="Deterministic grader exceeded the configured local resource limit.",
             )
         deterministic = compose_grades(
-            plan,
+            grading_plan,
             [
                 PrimitiveGrade(
                     primitive=call.primitive,
@@ -131,16 +131,17 @@ def grade_response(
                     equivalence_candidate=True,
                     deterministic_skip_reason="comparison_timeout",
                 )
-                for call in plan.calls
+                for call in grading_plan.calls
             ],
         )
     except Exception as exc:
-        return GradeReport(
-            problem_id=selected_problem.problem_id,
-            answer_type=selected_problem.answer_contract.answer_type,
-            raw_response=response,
-            response_sha256=response_hash,
-            extraction_status="not_attempted",
+        return format_report(
+            selected_problem,
+            response,
+            extracted_answer=extracted_answer,
+            extraction_status="success"
+            if extracted_answer is not None
+            else "not_attempted",
             grading_status="grader_error",
             passed=False,
             error_message=str(exc),
@@ -155,12 +156,10 @@ def grade_response(
         )
     ]
     if invalid_scalar_targets:
-        return GradeReport(
-            problem_id=selected_problem.problem_id,
-            answer_type=selected_problem.answer_type,
-            raw_response=response,
-            response_sha256=response_hash,
-            extracted_answer=_json_safe(extracted_answer),
+        return format_report(
+            selected_problem,
+            response,
+            extracted_answer=extracted_answer,
             extraction_status="invalid_answer_format",
             grading_status="not_graded",
             passed=False,
@@ -179,7 +178,7 @@ def grade_response(
         if isinstance(value, UnexecutedAnswer)
     ]
     answer_fields = {
-        "extracted_answer": None if text_answers else _json_safe(extracted_answer),
+        "extracted_answer": None if text_answers else extracted_answer,
         "extraction_status": "text_only" if text_answers else "success",
         "candidate_answer_code": text_answers[0].answer_code if text_answers else None,
         "deterministic_skip_reasons": {
@@ -207,28 +206,28 @@ def grade_response(
     ):
         if grade.passed or not grade.equivalence_candidate:
             continue
-        numeric_comparison = None
-        if call.primitive == "exact" and grade.deterministic_skip_reason in {
-            None,
-            "comparison_timeout",
-        }:
-            numeric_comparison = _compare_exact_with_deadline(
-                extracted_answer[call.target],
-                call.expected,
-                target=call.target,
-                significant_digits=16,
-            )
-            exact_numeric_comparisons.append(numeric_comparison)
-        if not judge_enabled:
-            if grade.deterministic_skip_reason is not None:
-                uncertain_indexes.add(index)
-            continue
-        if selected_judge is None:
-            selected_judge = ExpressionEquivalenceJudge()
         try:
+            numeric_comparison = None
+            if call.primitive == "exact" and grade.deterministic_skip_reason in {
+                None,
+                "comparison_timeout",
+            }:
+                numeric_comparison = _evaluate_numeric_agreement_with_deadline(
+                    extracted_answer[call.target],
+                    call.expected,
+                    field_name=call.target,
+                    significant_digits=16,
+                )
+                exact_numeric_comparisons.append(numeric_comparison)
+            if not judge_enabled:
+                if grade.deterministic_skip_reason is not None:
+                    uncertain_indexes.add(index)
+                continue
+            if selected_judge is None:
+                selected_judge = LLMEquivalenceJudge()
             judgment = selected_judge.judge(
                 call=call,
-                actual=extracted_answer[call.target],
+                answer=extracted_answer[call.target],
                 deterministic_grade=grade,
                 public_problem={
                     "problem_statement": selected_problem.problem_statement,
@@ -236,11 +235,9 @@ def grade_response(
                 },
             )
         except Exception as exc:
-            return GradeReport(
-                problem_id=selected_problem.problem_id,
-                answer_type=selected_problem.answer_contract.answer_type,
-                raw_response=response,
-                response_sha256=response_hash,
+            return format_report(
+                selected_problem,
+                response,
                 **answer_fields,
                 grading_status="grader_error",
                 passed=False,
@@ -249,7 +246,7 @@ def grade_response(
                 equivalence_judgments=judgments,
                 exact_numeric_comparisons=exact_numeric_comparisons,
                 grading_results=deterministic_results,
-                error_message=("Expression equivalence Judge failed: " + str(exc)),
+                error_message=("Expression equivalence assessment failed: " + str(exc)),
             )
         if numeric_comparison is not None:
             judgment = _reconcile_numeric_evidence(
@@ -292,11 +289,9 @@ def grade_response(
         if compose_grades(selected_problem.grading_plan, optimistic).passed:
             grading_status = "grader_uncertain"
 
-    return GradeReport(
-        problem_id=selected_problem.problem_id,
-        answer_type=selected_problem.answer_contract.answer_type,
-        raw_response=response,
-        response_sha256=response_hash,
+    return format_report(
+        selected_problem,
+        response,
         **answer_fields,
         grading_status=grading_status,
         passed=final.passed,
@@ -327,17 +322,11 @@ def _grade_freestyle_response(
     semantic_judge: LLMSemanticJudge | None,
     attempt_id: str,
 ) -> GradeReport:
-    common = {
-        "problem_id": problem.problem_id,
-        "problem_format": "freestyle",
-        "answer_type": problem.answer_type,
-        "raw_response": response,
-        "response_sha256": hashlib.sha256(response.encode("utf-8")).hexdigest(),
-        "extraction_status": "not_applicable",
-    }
     if not response.strip():
-        return GradeReport(
-            **common,
+        return format_report(
+            problem,
+            response,
+            extraction_status="not_applicable",
             grading_status="fail",
             passed=False,
             score=0.0,
@@ -345,10 +334,18 @@ def _grade_freestyle_response(
         )
     try:
         selected_judge = semantic_judge or LLMSemanticJudge()
-        judgment = selected_judge.judge(problem, response, attempt_id=attempt_id)
+        judgment = selected_judge.judge(
+            response,
+            public_problem=problem.public_view(),
+            reference_answer=problem.reference_answer,
+            reference_solution=problem.reference_solution,
+            attempt_id=attempt_id,
+        )
     except Exception as exc:
-        return GradeReport(
-            **common,
+        return format_report(
+            problem,
+            response,
+            extraction_status="not_applicable",
             grading_status="grader_error",
             passed=False,
             error_message="SemanticJudge failed: " + str(exc),
@@ -358,8 +355,10 @@ def _grade_freestyle_response(
         "incorrect": "fail",
         "uncertain": "grader_uncertain",
     }[judgment.verdict]
-    return GradeReport(
-        **common,
+    return format_report(
+        problem,
+        response,
+        extraction_status="not_applicable",
         grading_status=status,
         passed=status == "pass",
         score=None if status == "grader_uncertain" else float(status == "pass"),
@@ -389,38 +388,45 @@ def _reconcile_numeric_evidence(
 
 
 def _numeric_comparison(
-    actual: Any, expected: Any, target: str, digits: int
+    answer: Any, target: Any, field_name: str, significant_digits: int
 ) -> ExactNumericComparison:
-    return compare_exact_numerically(
-        actual, expected, target=target, significant_digits=digits
+    return evaluate_numeric_agreement(
+        answer, target, field_name=field_name, significant_digits=significant_digits
     )
 
 
-def _compare_exact_with_deadline(
-    actual: Any,
-    expected: Any,
+def _evaluate_numeric_agreement_with_deadline(
+    answer: Any,
+    target: Any,
     *,
-    target: str,
+    field_name: str,
     significant_digits: int,
 ) -> ExactNumericComparison:
-    seconds = float(os.getenv("AUTO_CRITPT_NUMERIC_CHECK_TIMEOUT_SECONDS", "30"))
-    if seconds <= 0:
-        raise ValueError("AUTO_CRITPT_NUMERIC_CHECK_TIMEOUT_SECONDS must be positive")
+    seconds = float(
+        os.getenv(
+            "AUTO_CRITPT_NUMERIC_CHECK_TIMEOUT_SECONDS",
+            str(DEFAULT_NUMERIC_CHECK_TIMEOUT),
+        )
+    )
+    if not math.isfinite(seconds) or seconds <= 0:
+        raise ValueError(
+            "AUTO_CRITPT_NUMERIC_CHECK_TIMEOUT_SECONDS must be finite and positive"
+        )
     try:
         return run_with_deadline(
             _numeric_comparison,
-            actual,
-            expected,
+            answer,
             target,
+            field_name,
             significant_digits,
-            timeout_seconds=seconds,
+            timeout=seconds,
         )
-    except _GraderTimeout:
+    except GraderTimeout:
         reason = "Numeric exact-value comparison exceeded the configured local resource limit."
     except Exception as exc:
         reason = f"Numeric exact-value comparison unavailable: {exc}"
     return ExactNumericComparison(
-        target=target,
+        target=field_name,
         status="unavailable",
         significant_digits=significant_digits,
         reason=reason,
@@ -466,26 +472,7 @@ def _classify_extraction_error(message: str) -> str:
         for marker in (
             "could not execute",
             "could not call",
-            "sympy is not installed",
         )
     ):
         return "runtime_failure"
     return "parse_failure"
-
-
-def _json_safe(value: Any) -> Any:
-    try:
-        import sympy as sp
-    except ImportError:  # pragma: no cover
-        sp = None
-    if value is None or isinstance(value, bool | int | float | str):
-        return value
-    if sp is not None and isinstance(value, sp.Basic):
-        return str(value)
-    if isinstance(value, list | tuple):
-        return [_json_safe(item) for item in value]
-    if isinstance(value, set | frozenset):
-        return sorted((_json_safe(item) for item in value), key=repr)
-    if isinstance(value, dict):
-        return {str(key): _json_safe(item) for key, item in value.items()}
-    return str(value)

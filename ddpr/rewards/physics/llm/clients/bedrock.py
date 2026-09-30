@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import signal
 import threading
@@ -53,6 +54,8 @@ def run_bedrock_responses(
     timeout_seconds: float,
     reasoning_effort: str,
     json_mode: bool,
+    max_attempts: int = 3,
+    initial_backoff_seconds: float = 1.0,
 ) -> BedrockRunResult:
     payload: dict[str, Any] = {
         "model": model,
@@ -67,6 +70,8 @@ def run_bedrock_responses(
         url=(f"https://bedrock-mantle.{region}.api.aws/openai/v1/responses"),
         payload=payload,
         timeout_seconds=timeout_seconds,
+        max_attempts=max_attempts,
+        initial_backoff_seconds=initial_backoff_seconds,
     )
     output = response.get("output", [])
     if not isinstance(output, list):
@@ -86,7 +91,12 @@ def post_bedrock_json(
     payload: dict[str, Any],
     timeout_seconds: float,
     max_attempts: int = 3,
+    initial_backoff_seconds: float = 1.0,
 ) -> dict[str, Any]:
+    if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+        raise ValueError("timeout_seconds must be finite and positive")
+    if not math.isfinite(initial_backoff_seconds) or initial_backoff_seconds < 0:
+        raise ValueError("initial_backoff_seconds must be finite and nonnegative")
     if max_attempts < 1:
         raise ValueError("max_attempts must be at least 1")
     body = json.dumps(
@@ -127,7 +137,9 @@ def post_bedrock_json(
                 _is_retryable_http_error(exc.code, error_body)
                 and attempt < max_attempts
             ):
-                _bounded_backoff(attempt, deadline=deadline)
+                _bounded_backoff(
+                    attempt, deadline=deadline, initial_seconds=initial_backoff_seconds
+                )
                 continue
             raise RuntimeError(
                 f"Bedrock request failed with HTTP {exc.code}: "
@@ -142,7 +154,9 @@ def post_bedrock_json(
                     f"Bedrock request exceeded {timeout_seconds:g} seconds."
                 ) from exc
             if attempt < max_attempts:
-                _bounded_backoff(attempt, deadline=deadline)
+                _bounded_backoff(
+                    attempt, deadline=deadline, initial_seconds=initial_backoff_seconds
+                )
                 continue
             raise RuntimeError(f"Bedrock request failed: {exc.reason}") from exc
 
@@ -159,8 +173,8 @@ def post_bedrock_json(
     raise AssertionError("unreachable")
 
 
-def _bounded_backoff(attempt: int, *, deadline: float) -> None:
-    delay = 2 ** (attempt - 1)
+def _bounded_backoff(attempt: int, *, deadline: float, initial_seconds: float) -> None:
+    delay = initial_seconds * 2 ** (attempt - 1)
     time.sleep(min(delay, max(0.0, deadline - time.monotonic())))
 
 
@@ -180,12 +194,14 @@ def _wall_clock_deadline(timeout_seconds: float):
         raise _BedrockWallClockTimeout
 
     signal.signal(signal.SIGALRM, expire)
-    signal.setitimer(signal.ITIMER_REAL, timeout_seconds)
     try:
+        signal.setitimer(signal.ITIMER_REAL, timeout_seconds)
         yield
     finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, previous_handler)
+        try:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+        finally:
+            signal.signal(signal.SIGALRM, previous_handler)
 
 
 def _is_retryable_http_error(code: int, body: str) -> bool:

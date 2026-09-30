@@ -53,14 +53,24 @@ the public task, submitted result and expected expression, and must not solve
 the task or fill in a missing answer. Exact numeric cross-checks use 16 digits as
 conflict evidence, not a replacement for symbolic proof.
 
-Rule comparisons live in `rule/`; answer extraction and deadlines live in
-`execution/`. Both use the same expression vocabulary. LLM policies live in
-`llm/`, provider calls in `transport/`, and shared models in `schemas.py`.
-`inputs.py` normalizes native problems; `grader.py` coordinates assessments.
+Rule comparisons live in `rule/`, with dispatch in `compare.py` and mathematical
+parsing and result helpers in `utils.py`. Shared grading plans and assessment
+models live in `schemas.py`. Answer extraction and execution live in `answer.py`,
+checks in `validation.py`, and deadlines in `runtime.py`. LLM policies live in
+`llm/`, with provider calls in `llm/clients/`. `critpt_ai/` owns native problem
+formats, parsing and report formatting. `grader.py` coordinates assessments.
 Training metadata loading and numerical reward mapping stay in `reward.py`.
 Low-level comparisons operate on extracted values. Use `grade_response` for raw
 responses to apply extraction, timeouts and optional Judge handling. These code
 restrictions and deadlines do not provide container isolation.
+
+Rule functions use `grade_*(answer, target, **kwargs)`, for example
+`grade_symbolic(answer, target, variables=["x"])`. Here `target` is the reference
+value. The serialized plan retains `expected` for that value and `target` for the
+answer-field name; dispatch unpacks its `args` dictionary as keyword options.
+The graders are `grade_exact_numeric`, `grade_floating_numeric`, `grade_symbolic`
+and `grade_categorical`. `evaluate_numeric_agreement` provides supporting numerical
+evidence only; it does not assign a grade.
 
 Auto composite/multiple grading targets raise `ValueError` for now. Freestyle's
 multiple natural-language answer items are supported and are not Auto composite.
@@ -69,10 +79,11 @@ There is no partial-credit policy added by this integration.
 ## Results and errors
 
 `PhysicsReward` returns a float: 1.0 for pass, 0.0 for fail or an invalid student
-answer. If the grading core cannot determine correctness, it raises
-`PhysicsRewardError`; its `.report` is a serializable Pydantic `GradeReport` and
+answer. Resource limits remain unresolved. If the grading core cannot determine
+correctness, it raises `PhysicsRewardError`; its `.report` is a serializable Pydantic `GradeReport` and
 `.sample_id` identifies the affected attempt. The exception is pickle-safe.
-Bad/missing problem metadata and configuration errors propagate separately.
+Invalid problem metadata raises input-validation errors. Grader failures appear
+in the report; errors configuring the reward itself propagate directly.
 Neither adapter catches these exceptions or converts them to zero. A training
 controller must explicitly retry, skip, or stop on them.
 
@@ -122,7 +133,7 @@ Provider-specific OpenAI reasoning options can be supplied through
 Set both prefixes when switching both Judges. No LLM call is made on module
 import or reward construction; Auto deterministic passes do not call a Judge.
 
-For explicit configuration, import `ExpressionEquivalenceJudge` and
+For explicit configuration, import `LLMEquivalenceJudge` and
 `EquivalenceJudgeConfig` from `ddpr.rewards.physics.llm.equivalence`, or
 `LLMSemanticJudge` and `SemanticJudgeConfig` from
 `ddpr.rewards.physics.llm.semantic`, and pass the configured instance to
@@ -149,8 +160,7 @@ python -m ruff format --check .
 Tests use mocked Judge completions/transports. They cover wrong answers versus
 unresolved failures, teacher isolation, legacy inputs, inert SymPy fallback,
 native threading deadlines, the Slime reward adapter, and Swift's adapter with a
-mocked framework API. Full framework/GPU
-training and live Judge quality are separate checks, not implied by these tests.
+mocked framework API. Full framework/GPU training and live Judge quality are separate checks, not implied by these tests.
 
 With the sibling DDSR-Bench checkout available, test compiled CritPt-AI inputs:
 
@@ -176,3 +186,11 @@ accepted a semantic reference answer, and rejected an abstention. These results
 check assessment behavior, not answer-code execution or general judge accuracy.
 Private reports are retained under `data/physics-check/static-reference-20260930/`
 and excluded from Git.
+
+Saved-response checks on the same date replayed all ten rule references with
+unchanged results. A live Qwen3.8-Max check through `grade_response` accepted one
+Freestyle reference and rejected a wrong answer and an abstention. Replaying
+those identical requests through `PhysicsReward` returned 1, 0 and 0. Artifacts
+are under `data/physics-check/saved-response-20260930/`. These checks execute no
+corpus code; the full rule path, which runs answer functions, remains unverified
+on these references.

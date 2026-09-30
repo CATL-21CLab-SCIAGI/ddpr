@@ -1,4 +1,5 @@
 import asyncio
+import builtins
 import importlib.util
 import json
 import pickle
@@ -17,18 +18,18 @@ from ddpr.rewards import load_reward
 from ddpr.rewards.physics import (
     PhysicsReward,
     PhysicsRewardError,
+    answer,
     grade_response,
     grader,
     load_problem,
 )
-from ddpr.rewards.physics.execution import answers
-from ddpr.rewards.physics.execution.runtime import GraderTimeout
+from ddpr.rewards.physics.critpt_ai.schemas import GradeReport
 from ddpr.rewards.physics.llm.equivalence import (
     EquivalenceJudgeConfig,
-    ExpressionEquivalenceJudge,
+    LLMEquivalenceJudge,
 )
 from ddpr.rewards.physics.llm.semantic import LLMSemanticJudge, SemanticJudgeConfig
-from ddpr.rewards.physics.schemas import GradeReport
+from ddpr.rewards.physics.runtime import GraderTimeout
 
 
 @pytest.mark.parametrize(
@@ -36,7 +37,7 @@ from ddpr.rewards.physics.schemas import GradeReport
     [
         ("pass", "success", 1.0),
         ("fail", "success", 0.0),
-        ("resource_limit", "success", 0.0),
+        ("resource_limit", "success", None),
         ("not_graded", "missing_answer_function", 0.0),
         ("not_graded", "parse_failure", 0.0),
         ("not_graded", "invalid_answer_format", 0.0),
@@ -113,7 +114,7 @@ def forbidden_judge():
     def complete(_messages, _config):
         pytest.fail("This answer must not call the equivalence Judge")
 
-    return ExpressionEquivalenceJudge(
+    return LLMEquivalenceJudge(
         config=EquivalenceJudgeConfig(model="test"), completion=complete
     )
 
@@ -131,7 +132,7 @@ def equivalence(verdict="equivalent", prompts=None):
             }
         )
 
-    return ExpressionEquivalenceJudge(
+    return LLMEquivalenceJudge(
         config=EquivalenceJudgeConfig(model="test"), completion=complete
     )
 
@@ -238,6 +239,52 @@ def test_invalid_student_response_is_zero(response, status):
     assert report.extraction_status == status
 
 
+@pytest.mark.parametrize("failed_import", [1, 2])
+def test_missing_sympy_is_not_a_zero_reward(monkeypatch, failed_import):
+    original_import = builtins.__import__
+    imports = 0
+
+    def import_module(name, globals=None, *args, **kwargs):
+        nonlocal imports
+        if name == "sympy" and (globals or {}).get("__name__") == answer.__name__:
+            imports += 1
+            if imports == failed_import:
+                raise ImportError("SymPy dependency unavailable")
+        return original_import(name, globals, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", import_module)
+    with pytest.raises(PhysicsRewardError) as raised:
+        score(
+            PhysicsReward(judge_enabled=False), auto_problem("exact", "2"), block("2")
+        )
+    assert imports == failed_import
+    assert raised.value.report.grading_status == "grader_error"
+    assert "SymPy dependency unavailable" in raised.value.report.error_message
+
+
+@pytest.mark.parametrize(
+    "kind,expression", [("exact", "2"), ("symbolic", "2*x"), ("symbolic", "x+1")]
+)
+@pytest.mark.parametrize("error", [RuntimeError, TypeError, ValueError])
+def test_comparison_errors_are_not_zero_rewards(monkeypatch, kind, expression, error):
+    def fail(*args, **kwargs):
+        raise error("comparison failed internally")
+
+    monkeypatch.setattr("sympy.simplify", fail)
+    problem = (
+        auto_problem("symbolic", "2*x", {"variables": ["x"]})
+        if kind == "symbolic"
+        else auto_problem("exact", "2")
+    )
+    response = block(expression)
+    with pytest.raises(PhysicsRewardError) as raised:
+        score(PhysicsReward(judge_enabled=False), problem, response)
+    assert raised.value.report.grading_status == "grader_error"
+    assert raised.value.report.extraction_status == "success"
+    assert raised.value.report.extracted_answer is not None
+    assert "comparison failed internally" in raised.value.report.error_message
+
+
 def test_floating_expression_is_not_silently_rounded():
     report = grade_response(
         auto_problem("floating_numeric", 1.25, {"abs_tol": 0.01}),
@@ -252,7 +299,7 @@ def test_unsupported_sympy_is_inert_but_can_reach_judge(monkeypatch):
     def forbidden(*args):
         pytest.fail("Unsupported code was executed")
 
-    monkeypatch.setattr(answers, "_execute_answer_code", forbidden)
+    monkeypatch.setattr(answer, "_execute_answer_code", forbidden)
     prompts = []
     scorer = PhysicsReward(equivalence_judge=equivalence(prompts=prompts))
     problem = auto_problem("symbolic", "fresnels(x)", {"variables": ["x"]})
@@ -279,7 +326,7 @@ def test_unresolved_is_exception_not_zero(monkeypatch, failure):
         def unavailable(_messages, _config):
             raise TimeoutError("mock provider timeout")
 
-        judge = ExpressionEquivalenceJudge(
+        judge = LLMEquivalenceJudge(
             config=EquivalenceJudgeConfig(model="test"),
             completion=unavailable,
         )
@@ -418,7 +465,7 @@ import json
 import sys
 sys.path.insert(0, sys.argv[1])
 from standalone_physics.grader import grade_response
-from standalone_physics.inputs import parse_grading_problem
+from standalone_physics.critpt_ai.inputs import parse_grading_problem
 problem = parse_grading_problem(json.loads(sys.argv[2]))
 report = grade_response(problem, "", judge_enabled=False)
 assert report.extraction_status == "missing_answer_function"
@@ -482,13 +529,16 @@ def test_slime_reward_calls_real_grader_from_worker_thread(monkeypatch):
 
 def test_rule_comparisons():
     from ddpr.rewards.physics.rule.categorical import grade_categorical
-    from ddpr.rewards.physics.rule.numeric import grade_exact, grade_floating_numeric
+    from ddpr.rewards.physics.rule.numeric import (
+        grade_exact_numeric,
+        grade_floating_numeric,
+    )
     from ddpr.rewards.physics.rule.symbolic import grade_symbolic
 
-    assert grade_exact("sqrt(4)", "2").passed
-    assert grade_symbolic("x+x", "2*x", {"variables": ["x"]}).passed
-    assert grade_floating_numeric(1.0, 1.0, {"abs_tol": 0.01}).passed
-    assert grade_categorical({"A", "B"}, ["B", "A"]).passed
+    assert grade_exact_numeric(answer="sqrt(4)", target="2").passed
+    assert grade_symbolic(answer="x+x", target="2*x", variables=["x"]).passed
+    assert grade_floating_numeric(answer=1.0, target=1.0, abs_tol=0.01).passed
+    assert grade_categorical(answer={"A", "B"}, target=["B", "A"]).passed
 
 
 def test_swift_adapter_with_mocked_framework(monkeypatch):
@@ -511,3 +561,145 @@ def test_swift_adapter_with_mocked_framework(monkeypatch):
         reference_completion=[block("2"), block("2")],
         metadata=[{"problem": auto_problem(expected="1")}] * 2,
     ) == [1.0, 0.0]
+
+
+@pytest.mark.parametrize(
+    "kind,expected,args",
+    [
+        ("exact", "x", None),
+        ("exact", "", None),
+        ("floating_numeric", 1.0, {"abs_tol": -1}),
+        ("floating_numeric", float("inf"), {"abs_tol": 0.1}),
+        ("symbolic", "1", {"variables": ["x"]}),
+    ],
+)
+def test_invalid_references_are_not_zero_rewards(kind, expected, args):
+    problem = auto_problem(kind, expected, args)
+    response = block("1.0" if kind == "floating_numeric" else "2")
+    with pytest.raises(PhysicsRewardError) as raised:
+        score(PhysicsReward(judge_enabled=False), problem, response)
+    assert raised.value.report.grading_status == "grader_error"
+
+
+@pytest.mark.parametrize("timeout", ["0", "nan", "inf", "invalid"])
+def test_invalid_numeric_timeout_is_a_grader_error(monkeypatch, timeout):
+    monkeypatch.setenv("AUTO_CRITPT_NUMERIC_CHECK_TIMEOUT_SECONDS", timeout)
+    with pytest.raises(PhysicsRewardError) as raised:
+        score(
+            PhysicsReward(equivalence_judge=forbidden_judge()),
+            auto_problem(expected="2"),
+            block("3"),
+        )
+    assert raised.value.report.grading_status == "grader_error"
+    assert raised.value.report.extraction_status == "success"
+    assert (
+        "Expression equivalence assessment failed" in raised.value.report.error_message
+    )
+
+
+def test_judge_configuration_failure_is_reported(monkeypatch):
+    monkeypatch.setenv("AUTO_CRITPT_GRADER_JUDGE_BACKEND", "invalid")
+    report = grade_response(
+        auto_problem("symbolic", "x", {"variables": ["x"]}),
+        block("sp.fresnels(x)"),
+    )
+    assert report.grading_status == "grader_error"
+    assert report.extraction_status == "text_only"
+    assert "backend" in report.error_message
+
+
+@pytest.mark.parametrize("judge_enabled", [False, True])
+def test_comparison_timeout_preserves_fallback(monkeypatch, judge_enabled):
+    def timeout(*args):
+        raise GraderTimeout
+
+    monkeypatch.setattr(grader, "grade_with_plan", timeout)
+    report = grade_response(
+        auto_problem("symbolic", "x+1", {"variables": ["x"]}),
+        block("x+1"),
+        judge_enabled=judge_enabled,
+        equivalence_judge=equivalence("equivalent"),
+    )
+    assert report.extraction_status == "success"
+    assert report.grading_status == ("pass" if judge_enabled else "grader_error")
+    if judge_enabled:
+        assert report.deterministic_skip_reasons == {"answer": "comparison_timeout"}
+
+
+@pytest.mark.parametrize("target", ["", " ", "\n"])
+def test_empty_grading_target_is_invalid_metadata(target):
+    problem = auto_problem(expected="1")
+    problem["grading_plan"]["calls"][0]["target"] = target
+    with pytest.raises(ValueError, match="target"):
+        load_problem({"problem": problem})
+
+
+def test_legacy_freestyle_accepts_mapping_input():
+    from types import MappingProxyType
+
+    problem = freestyle_problem()
+    del problem["answer_items"]
+    assert load_problem({"problem": MappingProxyType(problem)}) == load_problem(
+        {"problem": problem}
+    )
+
+
+@pytest.mark.parametrize("freestyle", [False, True])
+def test_native_report_formatting(freestyle):
+    import hashlib
+
+    from sympy import Rational
+
+    from ddpr.rewards.physics.critpt_ai.outputs import format_report
+
+    problem = load_problem(
+        {"problem": freestyle_problem() if freestyle else auto_problem()}
+    )
+    response = "A mathematical response: α = ½"
+    report = format_report(
+        problem,
+        response,
+        extraction_status="not_applicable" if freestyle else "success",
+        grading_status="pass",
+        passed=True,
+        score=1.0,
+        extracted_answer={"answer": Rational(1, 2)},
+    )
+    assert report.problem_id == problem.problem_id
+    assert report.problem_format == ("freestyle" if freestyle else "auto")
+    assert report.answer_type == problem.answer_type
+    assert report.raw_response == response
+    assert report.response_sha256 == hashlib.sha256(response.encode()).hexdigest()
+    assert report.extracted_answer == {"answer": "1/2"}
+    assert GradeReport.model_validate_json(report.model_dump_json()) == report
+
+
+@pytest.mark.parametrize(
+    "kind,target,kwargs,response",
+    [
+        ("categorical", "B", {"choices": ["A"]}, "'A'"),
+        ("symbolic", "sin(x)**2+cos(x)**2", {"variables": ["x"]}, "2"),
+        (
+            "symbolic",
+            "sin(x)**2+cos(x)**2",
+            {"variables": ["x"]},
+            "sp.sin(x)**2+sp.cos(x)**2",
+        ),
+        (
+            "symbolic",
+            "sin(x)**2+cos(x)**2",
+            {"variables": ["x"]},
+            "sp.cos(x)**2+sp.sin(x)**2+1",
+        ),
+    ],
+)
+def test_invalid_reference_cannot_be_an_incorrect_answer(
+    kind, target, kwargs, response
+):
+    with pytest.raises(PhysicsRewardError) as raised:
+        score(
+            PhysicsReward(judge_enabled=False),
+            auto_problem(kind, target, kwargs),
+            block(response),
+        )
+    assert raised.value.report.grading_status == "grader_error"

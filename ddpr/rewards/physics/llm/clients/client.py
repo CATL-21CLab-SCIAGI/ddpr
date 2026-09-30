@@ -1,15 +1,15 @@
-"""Default synchronous model transport for physics assessments."""
+"""Default synchronous model client for physics assessments."""
 
 from __future__ import annotations
 
-from ..schemas import CompletionResult
+from ...schemas import CompletionResult
 from .bedrock import run_bedrock_responses
-from .config import JudgeBackendConfig
+from .config import ClientConfig
 from .openai import GenerationConfig, OpenAIChatBackend, OpenAIChatBackendConfig
 
 
 def complete_judge(
-    messages: list[dict[str, str]], config: JudgeBackendConfig
+    messages: list[dict[str, str]], config: ClientConfig
 ) -> CompletionResult:
     if config.backend == "bedrock":
         run = run_bedrock_responses(
@@ -20,6 +20,8 @@ def complete_judge(
             timeout_seconds=config.timeout_seconds,
             reasoning_effort=config.reasoning_effort,
             json_mode=True,
+            max_attempts=config.http_max_attempts,
+            initial_backoff_seconds=config.http_backoff_seconds,
         )
         return CompletionResult(
             content=run.content,

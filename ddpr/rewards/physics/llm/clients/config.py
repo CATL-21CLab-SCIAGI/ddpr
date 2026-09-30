@@ -10,10 +10,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..schemas import CompletionResult
+from ...schemas import CompletionResult
 
 
-class JudgeBackendConfig(BaseModel):
+class ClientConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     backend: Literal["bedrock", "openai"] = "bedrock"
@@ -21,15 +21,15 @@ class JudgeBackendConfig(BaseModel):
     region: str = "us-east-1"
     max_tokens: int = Field(default=16000, ge=1)
     reasoning_effort: str = "high"
-    timeout_seconds: float = Field(default=600.0, gt=0.0)
+    timeout_seconds: float = Field(default=600.0, gt=0.0, allow_inf_nan=False)
     base_url: str = "http://127.0.0.1:8000/v1"
     api_key_env: str | None = "OPENAI_API_KEY"
     http_max_attempts: int = Field(default=3, ge=1, le=10)
-    http_backoff_seconds: float = Field(default=1.0, ge=0.0)
+    http_backoff_seconds: float = Field(default=1.0, ge=0.0, allow_inf_nan=False)
     extra_body: dict[str, Any] = Field(default_factory=dict)
 
 
-def transport_from_env(prefix: str) -> dict[str, Any]:
+def client_from_env(prefix: str) -> dict[str, Any]:
     load_dotenv()
     raw = os.getenv(f"{prefix}_EXTRA_BODY_JSON", "").strip()
     extra = json.loads(raw) if raw else {}
@@ -60,9 +60,7 @@ def transport_from_env(prefix: str) -> dict[str, Any]:
     return values
 
 
-Completion = Callable[
-    [list[dict[str, str]], JudgeBackendConfig], str | CompletionResult
-]
+Completion = Callable[[list[dict[str, str]], ClientConfig], str | CompletionResult]
 
 
 def load_dotenv(path: Path | None = None) -> None:

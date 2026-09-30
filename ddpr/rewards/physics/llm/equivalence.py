@@ -5,34 +5,37 @@ import os
 from collections.abc import Mapping
 from typing import Any, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import Field
 
 from ..schemas import (
     EquivalenceJudgment,
+    EquivalenceResponse,
     GradingCall,
     PrimitiveGrade,
     UnexecutedAnswer,
 )
-from ..transport.client import complete_judge
-from ..transport.config import (
+from .clients.client import complete_judge
+from .clients.config import (
+    ClientConfig,
     Completion,
-    JudgeBackendConfig,
-    transport_from_env,
+    client_from_env,
 )
-from .parsing import extract_json_object, normalize_result
+from .utils import extract_json_object, normalize_result
+
+EQUIVALENCE_ENV_PREFIX = "AUTO_CRITPT_GRADER_JUDGE"
 
 
-class EquivalenceJudgeConfig(JudgeBackendConfig):
+class EquivalenceJudgeConfig(ClientConfig):
     max_tokens: int = Field(default=16000, ge=1, le=32000)
     minimum_confidence: float = Field(default=0.90, ge=0.0, le=1.0)
 
     @classmethod
     def from_env(cls) -> "EquivalenceJudgeConfig":
         return cls(
-            **transport_from_env("AUTO_CRITPT_GRADER_JUDGE"),
+            **client_from_env(EQUIVALENCE_ENV_PREFIX),
             minimum_confidence=float(
                 os.getenv(
-                    "AUTO_CRITPT_GRADER_JUDGE_MIN_CONFIDENCE",
+                    f"{EQUIVALENCE_ENV_PREFIX}_MIN_CONFIDENCE",
                     "0.90",
                 )
             ),
@@ -44,39 +47,13 @@ class EquivalenceJudge(Protocol):
         self,
         *,
         call: GradingCall,
-        actual: Any,
+        answer: Any,
         deterministic_grade: PrimitiveGrade,
         public_problem: Mapping[str, str] | None = None,
     ) -> EquivalenceJudgment: ...
 
 
-class _EquivalenceResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    verdict: str
-    confidence: float = Field(ge=0.0, le=1.0)
-    rationale: str = Field(min_length=1)
-    assumptions_used: list[str] = Field(default_factory=list)
-
-    @field_validator("assumptions_used", mode="before")
-    @classmethod
-    def normalize_assumptions_used(cls, value: Any) -> Any:
-        if value is None:
-            return []
-        if isinstance(value, str):
-            return [value]
-        if isinstance(value, Mapping):
-            return [
-                f"{key}: {item}"
-                for key, item in sorted(
-                    value.items(),
-                    key=lambda pair: str(pair[0]),
-                )
-            ]
-        return value
-
-
-class ExpressionEquivalenceJudge:
+class LLMEquivalenceJudge:
     def __init__(
         self,
         *,
@@ -90,7 +67,7 @@ class ExpressionEquivalenceJudge:
         self,
         *,
         call: GradingCall,
-        actual: Any,
+        answer: Any,
         deterministic_grade: PrimitiveGrade,
         public_problem: Mapping[str, str] | None = None,
     ) -> EquivalenceJudgment:
@@ -99,7 +76,7 @@ class ExpressionEquivalenceJudge:
         payload = {
             "primitive": call.primitive,
             "target": call.target,
-            "actual_expression": str(actual),
+            "actual_expression": str(answer),
             "expected_expression": str(call.expected),
             "variables": call.args.get("variables", []),
             "variable_assumptions": call.args.get(
@@ -121,9 +98,9 @@ class ExpressionEquivalenceJudge:
                 for key in ("problem_statement", "public_solver_output_instructions")
                 if key in public_problem
             }
-        if isinstance(actual, UnexecutedAnswer):
-            payload["unexecuted_answer_code"] = actual.answer_code
-        messages = _equivalence_messages(payload)
+        if isinstance(answer, UnexecutedAnswer):
+            payload["unexecuted_answer_code"] = answer.answer_code
+        messages = _messages(payload)
         complete = self._completion or complete_judge
         result = normalize_result(complete(messages, self.config))
         content = result.content or ""
@@ -131,22 +108,14 @@ class ExpressionEquivalenceJudge:
         usage = result.usage
         model = result.model or self.config.model
         if not content.strip():
-            raise RuntimeError("ExpressionEquivalenceJudge returned no content")
+            raise RuntimeError("LLMEquivalenceJudge returned no content")
 
-        response = _EquivalenceResponse.model_validate(
+        response = EquivalenceResponse.model_validate(
             extract_json_object(
                 content,
-                source="ExpressionEquivalenceJudge response",
+                source="LLMEquivalenceJudge response",
             )
         )
-        if response.verdict not in {
-            "equivalent",
-            "not_equivalent",
-            "uncertain",
-        }:
-            raise ValueError(
-                "equivalence verdict must be equivalent, not_equivalent, or uncertain"
-            )
         resolution = response.verdict
         if (
             response.verdict == "equivalent"
@@ -154,13 +123,10 @@ class ExpressionEquivalenceJudge:
         ):
             resolution = "uncertain"
         return EquivalenceJudgment(
+            **response.model_dump(),
             primitive=call.primitive,
             target=call.target,
-            verdict=response.verdict,
             resolution=resolution,
-            confidence=response.confidence,
-            rationale=response.rationale.strip(),
-            assumptions_used=response.assumptions_used,
             model=model,
             raw_response=content,
             response_id=response_id,
@@ -168,7 +134,7 @@ class ExpressionEquivalenceJudge:
         )
 
 
-def _equivalence_messages(payload: dict[str, Any]) -> list[dict[str, str]]:
+def _messages(payload: dict[str, Any]) -> list[dict[str, str]]:
     return [
         {
             "role": "system",

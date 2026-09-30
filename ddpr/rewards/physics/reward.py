@@ -11,11 +11,11 @@ from typing import Any
 
 from ddpr.rewards.base import Reward
 
+from .critpt_ai.inputs import parse_grading_problem
+from .critpt_ai.schemas import GradeReport, GradingInput
 from .grader import grade_response
-from .inputs import parse_grading_problem
 from .llm.equivalence import EquivalenceJudge
 from .llm.semantic import LLMSemanticJudge
-from .schemas import GradeReport, GradingInput
 
 
 class PhysicsRewardError(RuntimeError):
@@ -90,7 +90,7 @@ class PhysicsReward(Reward):
         )
         if report.grading_status == "pass":
             return 1.0
-        if report.grading_status in {"fail", "resource_limit"}:
+        if report.grading_status == "fail":
             return 0.0
         if report.grading_status == "not_graded" and report.extraction_status in {
             "missing_answer_function",

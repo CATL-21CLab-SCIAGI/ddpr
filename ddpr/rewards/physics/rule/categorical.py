@@ -3,39 +3,34 @@ from __future__ import annotations
 from typing import Any
 
 from ..schemas import PrimitiveGrade, unsupported_grading_args
-from .common import _grade
+from .utils import _grade
 
 
 def grade_categorical(
-    actual: Any,
-    expected: Any,
-    args: dict[str, Any] | None = None,
+    answer: Any,
+    target: Any,
+    **kwargs: Any,
 ) -> PrimitiveGrade:
-    args = args or {}
-    unsupported_args = unsupported_grading_args("categorical", args)
+    unsupported_args = unsupported_grading_args("categorical", kwargs)
     if unsupported_args:
-        return _grade(
-            "categorical",
-            "",
-            False,
-            f"unsupported categorical args: {unsupported_args}",
-        )
-    case_sensitive = bool(args.get("case_sensitive", True))
-    allowed_aliases = args.get("allowed_aliases") or {}
-    allowed_choices = args.get("allowed_choices") or args.get("choices")
+        raise ValueError(f"unsupported categorical args: {unsupported_args}")
+    case_sensitive = bool(kwargs.get("case_sensitive", True))
+    allowed_aliases = kwargs.get("allowed_aliases") or {}
+    allowed_choices = kwargs.get("allowed_choices") or kwargs.get("choices")
 
-    actual_set = _category_set(actual, case_sensitive, allowed_aliases)
-    expected_set = _category_set(expected, case_sensitive, allowed_aliases)
+    actual_set = _category_set(answer, case_sensitive, allowed_aliases)
+    expected_set = _category_set(target, case_sensitive, allowed_aliases)
     allowed_set = (
         _category_set(allowed_choices, case_sensitive, allowed_aliases)
         if allowed_choices is not None
         else None
     )
+    if allowed_set is not None and not expected_set <= allowed_set:
+        raise ValueError("reference categories are not among the allowed choices")
     if allowed_set is not None and not actual_set <= allowed_set:
         extra = sorted(actual_set - allowed_set)
         return _grade(
             "categorical",
-            "",
             False,
             f"selected categories are not candidates: {extra}",
         )
@@ -46,7 +41,7 @@ def grade_categorical(
         if passed
         else f"{sorted(actual_set)!r} != {sorted(expected_set)!r}"
     )
-    return _grade("categorical", "", passed, reason)
+    return _grade("categorical", passed, reason)
 
 
 def _normalize_category(value: Any, case_sensitive: bool) -> str:
@@ -72,11 +67,15 @@ def _alias_lookup(
     lookup: dict[str, str] = {}
     for canonical, aliases in allowed_aliases.items():
         normalized_canonical = _normalize_category(canonical, case_sensitive)
-        lookup[normalized_canonical] = normalized_canonical
         if isinstance(aliases, str):
             alias_values = [aliases]
         else:
             alias_values = list(aliases)
-        for alias in alias_values:
-            lookup[_normalize_category(alias, case_sensitive)] = normalized_canonical
+        for alias in [canonical, *alias_values]:
+            normalized = _normalize_category(alias, case_sensitive)
+            if normalized in lookup and lookup[normalized] != normalized_canonical:
+                raise ValueError(
+                    f"category alias {normalized!r} has conflicting meanings"
+                )
+            lookup[normalized] = normalized_canonical
     return lookup

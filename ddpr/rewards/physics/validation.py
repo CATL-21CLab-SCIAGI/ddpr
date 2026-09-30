@@ -1,10 +1,15 @@
+"""Syntax checks and restricted SymPy operations for local evaluation."""
+
 from __future__ import annotations
 
 import ast
+import math
 import re
 from fractions import Fraction
 from types import SimpleNamespace
 from typing import Any
+
+from .schemas import GradingPlan
 
 _ALLOWED_SYMPY_CALLS = {
     "Abs",
@@ -109,11 +114,6 @@ _ALLOWED_SYMPY_CALLS = {
 }
 
 
-def allowed_sympy_calls() -> tuple[str, ...]:
-    """Internal execution vocabulary, not a public mathematical answer contract."""
-    return tuple(sorted(_ALLOWED_SYMPY_CALLS))
-
-
 class UnsupportedAnswerOperation(ValueError):
     """A readable answer uses operations outside the local execution policy."""
 
@@ -192,7 +192,7 @@ def _sympy_execution_namespace(sp: Any) -> SimpleNamespace:
         return False
 
     def checked(name: str) -> Any:
-        function = getattr(sp, name)
+        fn = getattr(sp, name)
 
         def call(*args: Any, **kwargs: Any) -> Any:
             # Many mathematical APIs sympify strings internally, including aliases
@@ -204,7 +204,7 @@ def _sympy_execution_namespace(sp: Any) -> SimpleNamespace:
                 raise UnsupportedAnswerOperation(
                     f"String arguments to sp.{name} require text-only comparison."
                 )
-            return function(*args, **kwargs)
+            return fn(*args, **kwargs)
 
         return call
 
@@ -212,57 +212,6 @@ def _sympy_execution_namespace(sp: Any) -> SimpleNamespace:
         **{name: checked(name) for name in _ALLOWED_SYMPY_CALLS},
         **{name: getattr(sp, name) for name in _SYMPY_CONSTANT_NAMES},
     )
-
-
-def _parse_expression(
-    value: Any,
-    sp: Any,
-    *,
-    local_dict: dict[str, Any] | None = None,
-) -> Any:
-    from sympy.parsing.sympy_parser import (
-        convert_xor,
-        implicit_multiplication_application,
-        parse_expr,
-        standard_transformations,
-    )
-
-    if isinstance(value, bool) or isinstance(value, float):
-        raise TypeError("expression values may not be booleans or Python floats")
-    if isinstance(value, sp.Expr):
-        return value
-    if isinstance(value, int):
-        return sp.Integer(value)
-    if not isinstance(value, str) or not value.strip():
-        raise TypeError(
-            "expression value must be an integer, SymPy expression, or non-empty string"
-        )
-    _validate_expression_call_names(value)
-    transformations = standard_transformations + (
-        implicit_multiplication_application,
-        convert_xor,
-    )
-    expression_locals = dict(local_dict or {})
-    for name in _bare_expression_identifiers(value):
-        expression_locals.setdefault(name, sp.Symbol(name))
-    allowed_sp = _sympy_execution_namespace(sp)
-    expression = parse_expr(
-        value,
-        local_dict=expression_locals,
-        global_dict={
-            "__builtins__": {},
-            **{
-                name: getattr(allowed_sp, name)
-                for name in _ALLOWED_SYMPY_CALLS | _SYMPY_CONSTANT_NAMES
-            },
-            "sp": allowed_sp,
-            "sympy": allowed_sp,
-        },
-        transformations=transformations,
-    )
-    if not isinstance(expression, sp.Expr):
-        raise TypeError("expression value must be a scalar SymPy expression")
-    return expression
 
 
 def _validate_expression_call_names(value: str) -> None:
@@ -321,57 +270,133 @@ _SYMPY_CONSTANT_NAMES = {
 }
 
 
-def _bare_expression_identifiers(value: str) -> set[str]:
-    names: set[str] = set()
-    for match in re.finditer(r"\b[A-Za-z_]\w*\b", value):
-        name = match.group(0)
-        before = value[: match.start()].rstrip()
-        after = value[match.end() :].lstrip()
-        if name in _SYMPY_CONSTANT_NAMES:
-            continue
-        if (before and before[-1] == ".") or (after and after[0] in ".("):
-            continue
-        names.add(name)
-    return names
+def _validate_code(tree: ast.Module, *, allow_unsupported_calls: bool = False) -> None:
+    unsupported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, _FORBIDDEN_AST_NODES):
+            raise ValueError(
+                f"Python answer block uses unsupported syntax: {type(node).__name__}"
+            )
+        if isinstance(node, ast.Import):
+            _validate_import(node)
+        if isinstance(node, ast.Call):
+            if not isinstance(node.func, ast.Attribute):
+                raise ValueError(
+                    "Python answer block may only call SymPy functions or expression methods."
+                )
+            if node.func.attr in _UNSAFE_CALL_NAMES:
+                raise ValueError(f"Python answer block may not use {node.func.attr!r}.")
+            if not _is_allowed_call(node.func) or _string_call_requires_review(node):
+                unsupported.add(ast.unparse(node.func))
+        if isinstance(node, ast.Attribute):
+            if isinstance(node.ctx, (ast.Store, ast.Del)):
+                raise ValueError(
+                    "Python answer block may not modify object attributes."
+                )
+            if node.attr.startswith("_"):
+                raise ValueError(
+                    "Python answer block may not access private attributes."
+                )
+            if (
+                not isinstance(node.value, ast.Name)
+                or node.value.id not in {"sp", "sympy"}
+                or node.attr not in _ALLOWED_SYMPY_CALLS | _SYMPY_CONSTANT_NAMES
+            ):
+                unsupported.add(ast.unparse(node))
+        if isinstance(node, ast.Name) and node.id in _UNSAFE_CALL_NAMES:
+            raise ValueError(f"Python answer block may not use {node.id!r}.")
+    if unsupported and not allow_unsupported_calls:
+        raise UnsupportedAnswerOperation(
+            "Local execution does not support: " + ", ".join(sorted(unsupported))
+        )
 
 
-def _validate_closed_form_expression(
-    expression: Any,
-    sp: Any,
-    *,
-    label: str,
+def _validate_import(node: ast.Import) -> None:
+    for alias in node.names:
+        if alias.name != "sympy" or alias.asname not in {None, "sp"}:
+            raise ValueError("Python answer block may only import sympy as sp.")
+
+
+def _is_allowed_call(node: ast.expr) -> bool:
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+        return node.value.id in {"sp", "sympy"} and node.attr in _ALLOWED_SYMPY_CALLS
+    return False
+
+
+def _validate_floating_literal_returns(
+    node: ast.FunctionDef,
+    grading_plan: GradingPlan,
 ) -> None:
-    from sympy.core.function import AppliedUndef
+    floating_targets = {
+        call.target
+        for call in grading_plan.calls
+        if call.primitive == "floating_numeric"
+    }
+    if not floating_targets:
+        return
 
-    unsupported = (
-        sp.Integral,
-        sp.Derivative,
-        sp.Limit,
-        sp.Sum,
-        sp.Product,
+    returns = [node for node in ast.walk(node) if isinstance(node, ast.Return)]
+    if len(returns) != 1 or returns[0].value is None:
+        raise ValueError(
+            "floating_numeric answers must use exactly one return statement "
+            "with direct finite Python float literals."
+        )
+
+    returned = returns[0].value
+    values_by_target: dict[str, ast.expr] = {}
+    if isinstance(returned, ast.Dict):
+        for key, value in zip(returned.keys, returned.values, strict=True):
+            if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                values_by_target[key.value] = value
+    elif floating_targets == {"answer"}:
+        values_by_target["answer"] = returned
+
+    for target in sorted(floating_targets):
+        value = values_by_target.get(target)
+        if value is None:
+            continue
+        if not _is_direct_finite_float_literal(value):
+            raise ValueError(
+                f"floating_numeric target {target!r} must be returned as a "
+                "direct finite Python float literal."
+            )
+
+
+def _is_direct_finite_float_literal(node: ast.expr) -> bool:
+    value_node = node
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.UAdd | ast.USub):
+        value_node = node.operand
+    return (
+        isinstance(value_node, ast.Constant)
+        and type(value_node.value) is float
+        and math.isfinite(value_node.value)
     )
-    present = [kind.__name__ for kind in unsupported if expression.has(kind)]
-    if present:
-        raise ValueError(
-            f"{label} expression contains unevaluated operations: {present}"
-        )
-    undefined = sorted(str(item.func) for item in expression.atoms(AppliedUndef))
-    if undefined:
-        raise ValueError(
-            f"{label} expression contains undefined functions or operators: {undefined}"
-        )
-    if expression.has(sp.nan, sp.zoo, sp.oo, -sp.oo):
-        raise ValueError(f"{label} expression must be finite")
 
 
-def _validate_exact_expression(
-    expression: Any,
-    sp: Any,
+def _validate_answer_code(
+    code: str,
     *,
-    label: str,
-) -> None:
-    if expression.free_symbols:
-        names = sorted(str(symbol) for symbol in expression.free_symbols)
-        raise ValueError(f"{label} exact value contains free variables: {names}")
-    if expression.atoms(sp.Float):
-        raise ValueError(f"{label} exact value contains floating-point terms")
+    grading_plan: GradingPlan | None = None,
+    allow_unsupported_calls: bool = False,
+) -> ast.Module:
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as exc:
+        raise ValueError(f"Python answer block has invalid syntax: {exc}") from exc
+
+    answer_defs = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "answer"
+    ]
+    if len(answer_defs) != 1:
+        raise ValueError(
+            "Python answer block must define exactly one answer() function."
+        )
+    if answer_defs[0].args.vararg or answer_defs[0].args.kwarg:
+        raise ValueError("answer() may not use *args or **kwargs.")
+    if grading_plan is not None:
+        _validate_floating_literal_returns(answer_defs[0], grading_plan)
+
+    _validate_code(tree, allow_unsupported_calls=allow_unsupported_calls)
+    return tree

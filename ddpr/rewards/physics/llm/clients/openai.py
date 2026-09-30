@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from ..schemas import CompletionResult, ProviderCallRecord
+from ...schemas import CompletionResult, ProviderCallRecord
 
 DEFAULT_MAX_TOKENS = 96000
 DEFAULT_TIMEOUT_SECONDS = 1500.0
@@ -35,6 +35,7 @@ class GenerationConfig(BaseModel):
     timeout_seconds: float = Field(
         default=DEFAULT_TIMEOUT_SECONDS,
         gt=0.0,
+        allow_inf_nan=False,
     )
     temperature: float | None = Field(default=None, ge=0.0)
     top_p: float | None = Field(default=None, gt=0.0, le=1.0)
@@ -57,7 +58,7 @@ class OpenAIChatBackendConfig(BaseModel):
     base_url: str = "http://127.0.0.1:8000/v1"
     api_key_env: str | None = "OPENAI_API_KEY"
     max_attempts: int = Field(default=3, ge=1, le=10)
-    initial_backoff_seconds: float = Field(default=1.0, ge=0.0)
+    initial_backoff_seconds: float = Field(default=1.0, ge=0.0, allow_inf_nan=False)
 
 
 class BackendInfrastructureError(RuntimeError):
@@ -264,11 +265,17 @@ class OpenAIChatBackend:
                     request_id=request_id,
                 )
             )
-            return _parse_chat_completion(
-                result,
-                calls=calls,
-                latency_seconds=time.perf_counter() - overall_started,
-            )
+            try:
+                return _parse_chat_completion(
+                    result,
+                    calls=calls,
+                    latency_seconds=time.perf_counter() - overall_started,
+                )
+            except BackendInfrastructureError as exc:
+                calls[-1].status = "non_retryable_error"
+                calls[-1].error_type = type(exc).__name__
+                calls[-1].error_message = str(exc)
+                raise
 
         raise AssertionError("unreachable")
 

@@ -1,7 +1,5 @@
 import json
 import os
-import time
-from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -9,19 +7,13 @@ pytest.importorskip("pydantic")
 pytest.importorskip("sympy")
 
 from ddpr.rewards.physics import grade_response
-from ddpr.rewards.physics.execution.runtime import GraderTimeout, run_with_deadline
+from ddpr.rewards.physics.llm.clients import bedrock, client
 from ddpr.rewards.physics.llm.equivalence import (
     EquivalenceJudgeConfig,
-    ExpressionEquivalenceJudge,
+    LLMEquivalenceJudge,
 )
 from ddpr.rewards.physics.llm.semantic import LLMSemanticJudge, SemanticJudgeConfig
-from ddpr.rewards.physics.schemas import (
-    CompletionResult,
-    FreestyleProblemGradingInput,
-    GradingCall,
-    PrimitiveGrade,
-)
-from ddpr.rewards.physics.transport import bedrock, client
+from ddpr.rewards.physics.schemas import CompletionResult, GradingCall, PrimitiveGrade
 
 
 @pytest.mark.parametrize(
@@ -94,12 +86,12 @@ def test_equivalence_confidence_contract(confidence, resolution):
             }
         )
 
-    judge = ExpressionEquivalenceJudge(
+    judge = LLMEquivalenceJudge(
         config=EquivalenceJudgeConfig(model="mock"), completion=complete
     )
     kwargs = {
         "call": GradingCall(primitive="exact", target="answer", expected="2"),
-        "actual": "1+1",
+        "answer": "1+1",
         "deterministic_grade": PrimitiveGrade(
             primitive="exact", target="answer", passed=False, score=0.0
         ),
@@ -140,7 +132,7 @@ def test_shared_completion_contract(monkeypatch, kind, structured):
     from ddpr.rewards.physics.llm import equivalence, semantic
 
     def forbidden(*args, **kwargs):
-        pytest.fail("Injected completion must bypass the default transport")
+        pytest.fail("Injected completion must bypass the default client")
 
     monkeypatch.setattr(semantic, "complete_judge", forbidden)
     monkeypatch.setattr(equivalence, "complete_judge", forbidden)
@@ -158,6 +150,8 @@ def test_shared_completion_contract(monkeypatch, kind, structured):
         )
     )
 
+    payload = "\n " + payload + " \n"
+
     def complete(messages, config):
         calls.append((messages, config))
         if not structured:
@@ -173,17 +167,36 @@ def test_shared_completion_contract(monkeypatch, kind, structured):
         judge = LLMSemanticJudge(
             config=SemanticJudgeConfig(model="configured-model"), completion=complete
         )
+        public_problem = {
+            "problem_id": "freestyle",
+            "problem_statement": "Compute the energy.",
+            "public_solver_output_instructions": "Give the value and explain.",
+            "answer_type": "exact",
+            "answer_items": [
+                {"item_id": "energy", "answer_type": "exact", "target": "Energy"}
+            ],
+        }
         result = judge.judge(
-            FreestyleProblemGradingInput.model_validate(problem()), "E=2"
+            "E=2",
+            public_problem=public_problem,
+            reference_answer="2",
+            reference_solution="E=1+1=2.",
         )
+        sent = json.loads(calls[0][0][1]["content"])
+        assert sent["public_task"] == public_problem
+        assert sent["answer_items"] == public_problem["answer_items"]
+        assert sent["private_reference"] == {
+            "reference_answer": "2",
+            "reference_solution": "E=1+1=2.",
+        }
         assert result.verdict == "correct"
     else:
-        judge = ExpressionEquivalenceJudge(
+        judge = LLMEquivalenceJudge(
             config=EquivalenceJudgeConfig(model="configured-model"), completion=complete
         )
         result = judge.judge(
             call=GradingCall(primitive="exact", target="answer", expected="2"),
-            actual="1+1",
+            answer="1+1",
             deterministic_grade=PrimitiveGrade(
                 primitive="exact", target="answer", passed=False, score=0.0
             ),
@@ -195,6 +208,7 @@ def test_shared_completion_contract(monkeypatch, kind, structured):
     assert result.model == ("served-model" if structured else "configured-model")
     assert result.response_id == ("request-1" if structured else None)
     assert result.usage == ({"total_tokens": 12} if structured else None)
+    assert result.raw_response == payload
 
 
 def test_semantic_schema_repair_is_bounded():
@@ -235,7 +249,7 @@ def test_semantic_failures_remain_unresolved(mode):
     assert len(calls) == (1 if mode == "api" else 2)
 
 
-def test_openai_equivalence_transport(monkeypatch):
+def test_openai_equivalence_client(monkeypatch):
     captured = {}
 
     def complete(self, messages, generation):
@@ -252,7 +266,7 @@ def test_openai_equivalence_transport(monkeypatch):
         )
 
     monkeypatch.setattr(client.OpenAIChatBackend, "complete", complete)
-    judge = ExpressionEquivalenceJudge(
+    judge = LLMEquivalenceJudge(
         config=EquivalenceJudgeConfig(
             backend="openai",
             model="local-judge",
@@ -289,7 +303,7 @@ def test_openai_equivalence_transport(monkeypatch):
     assert "Find f(x)." in json.dumps(captured["messages"])
 
 
-def test_bedrock_semantic_transport(monkeypatch):
+def test_bedrock_semantic_client(monkeypatch):
     captured = {}
 
     class Response:
@@ -345,14 +359,62 @@ def test_bedrock_semantic_transport(monkeypatch):
     assert captured["body"]["store"] is False
 
 
-@pytest.mark.parametrize("threaded", [False, True])
-def test_local_execution_deadline_in_training_threads(threaded):
-    def run():
-        with pytest.raises(GraderTimeout):
-            run_with_deadline(time.sleep, 10, timeout_seconds=0.05)
+@pytest.mark.parametrize(
+    "content",
+    [
+        '{"verdict":"correct","verdict":"incorrect"}',
+        'First: {"verdict":"correct"} Final: {"verdict":"incorrect"}',
+        '```json\n{"verdict":"correct"}\n```\n```json\n{"verdict":"incorrect"}\n```',
+        '{"result":{"verdict":"correct","verdict":"incorrect"}}',
+    ],
+)
+def test_ambiguous_judge_json_is_rejected(content):
+    from ddpr.rewards.physics.llm.utils import extract_json_object
 
-    if threaded:
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            pool.submit(run).result(timeout=5)
+    with pytest.raises(ValueError):
+        extract_json_object(content)
+
+
+@pytest.mark.parametrize("wrapper", ["{}", "```json\n{}\n```", "Result: {} Done."])
+def test_single_judge_json_preserves_content(wrapper):
+    from ddpr.rewards.physics.llm.utils import extract_json_object
+
+    payload = {"verdict": "correct", "rationale": "Use ``` and {x} literally"}
+    assert extract_json_object(wrapper.format(json.dumps(payload))) == payload
+
+
+@pytest.mark.parametrize("kind", ["equivalence", "semantic"])
+def test_blank_judge_explanations_are_rejected(kind):
+    calls = []
+
+    def complete(messages, config):
+        calls.append(messages)
+        payload = (
+            {"verdict": "equivalent", "confidence": 1, "rationale": " \t "}
+            if kind == "equivalence"
+            else json.loads(correct())
+        )
+        if kind == "semantic":
+            payload["assessment"] = " \n "
+        return json.dumps(payload)
+
+    if kind == "equivalence":
+        judge = LLMEquivalenceJudge(
+            config=EquivalenceJudgeConfig(model="mock"), completion=complete
+        )
+        with pytest.raises(ValueError):
+            judge.judge(
+                call=GradingCall(primitive="exact", target="answer", expected="2"),
+                answer="2",
+                deterministic_grade=PrimitiveGrade(
+                    primitive="exact", target="answer", passed=False, score=0
+                ),
+            )
+        assert len(calls) == 1
     else:
-        run()
+        judge = LLMSemanticJudge(
+            config=SemanticJudgeConfig(model="mock"), completion=complete
+        )
+        report = grade_response(problem(), "E=2", semantic_judge=judge)
+        assert report.grading_status == "grader_error"
+        assert len(calls) == 2
