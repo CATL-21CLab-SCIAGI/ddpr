@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from .schemas import CompletionResult, ProviderCallRecord
+from ..schemas import CompletionResult, ProviderCallRecord
 
 DEFAULT_MAX_TOKENS = 96000
 DEFAULT_TIMEOUT_SECONDS = 1500.0

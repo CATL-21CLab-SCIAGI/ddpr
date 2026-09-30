@@ -4,7 +4,7 @@ This module scores an already-generated student response against a canonical
 native Auto_CritPt or Freestyle_CritPt problem. It does not run a solver, generate
 graders, format free text into Python, audit problems, or modify training data.
 The mathematical and Judge implementations are a pinned, grading-only snapshot
-of Auto_CritPt_Grader 0.6.0; see [_core/UPSTREAM.md](_core/UPSTREAM.md).
+of Auto_CritPt_Grader 0.6.0; see [UPSTREAM.md](UPSTREAM.md).
 
 ## Input
 
@@ -53,10 +53,14 @@ the public task, submitted result and expected expression, and must not solve
 the task or fill in a missing answer. Exact numeric cross-checks use 16 digits as
 conflict evidence, not a replacement for symbolic proof.
 
-The five named modules expose the existing comparison/Judge implementations;
-they do not duplicate algorithms. Low-level `grade_exact`, `grade_symbolic`, etc.
-operate on extracted values. Use `grade_response` for untrusted raw responses so
-the normal extraction, timeout and optional Judge handling are applied.
+Rule comparisons live in `rules/`; answer extraction and deadlines live in
+`execution/`. Both use the same expression vocabulary. LLM policies live in
+`llm/`, provider calls in `transport/`, and shared models in `schemas.py`.
+`inputs.py` normalizes native problems; `grader.py` coordinates assessments.
+Training metadata loading and numerical reward mapping stay in `reward.py`.
+Low-level comparisons operate on extracted values. Use `grade_response` for raw
+responses to apply extraction, timeouts and optional Judge handling. These code
+restrictions and deadlines do not provide container isolation.
 
 Auto composite/multiple grading targets raise `ValueError` for now. Freestyle's
 multiple natural-language answer items are supported and are not Auto composite.
@@ -74,12 +78,15 @@ controller must explicitly retry, skip, or stop on them.
 
 For diagnostics outside the trainer:
 
+`grader.grade_response` returns assessments; `PhysicsReward` owns training score
+mapping. Use `grading_status` and `extraction_status` for diagnostics.
+
 ```python
 from ddpr.rewards.physics import grade_response, load_problem
 
 problem = load_problem(metadata)
 report = grade_response(problem, student_response)
-print(report.reward)  # 0, 1, or None if unresolved
+print(report.grading_status)  # pass, fail, or a diagnostic status
 print(report.model_dump_json(indent=2))
 ```
 
@@ -115,6 +122,21 @@ Provider-specific OpenAI reasoning options can be supplied through
 Set both prefixes when switching both Judges. No LLM call is made on module
 import or reward construction; Auto deterministic passes do not call a Judge.
 
+For explicit configuration, import `ExpressionEquivalenceJudge` and
+`EquivalenceJudgeConfig` from `ddpr.rewards.physics.llm.equivalence`, or
+`LLMSemanticJudge` and `SemanticJudgeConfig` from
+`ddpr.rewards.physics.llm.semantic`, and pass the configured instance to
+`PhysicsReward(equivalence_judge=...)` or `PhysicsReward(semantic_judge=...)`.
+
+Both judges accept `completion=complete`, where the synchronous callable has the
+signature `complete(messages, config) -> str | CompletionResult`. It replaces
+provider calls without changing prompts, parsing or grading policy. Return
+`CompletionResult` from `physics.schemas` to retain model, request ID and usage.
+The caller owns any injected client's lifecycle. Future DDSR-Bench integration
+can supply this callable; asynchronous clients need an explicit synchronous
+adapter, not a coroutine passed directly. The previous one-argument equivalence
+callback and provider-specific return type are replaced by this shared contract.
+
 ## Verification
 
 ```bash
@@ -130,11 +152,27 @@ native threading deadlines, the Slime reward adapter, and Swift's adapter with a
 mocked framework API. Full framework/GPU
 training and live Judge quality are separate checks, not implied by these tests.
 
-Integration validation on 2026-09-24: the full CPU suite passed (119 tests;
-29 optional framework/environment checks skipped), and Ruff lint/format checks
-passed. A read-only sample of 110 native Auto/Freestyle problems across v1, v2,
-v2 pinned/guidance and v3 loaded successfully. Eight saved Auto responses from
-v2/v3, covering all four primitives, produced identical full grading reports to
-the upstream implementation with live judging disabled. The retained 116 core
-function/class ASTs also matched upstream. A wheel build included the grading
-core and its license without depending on the standalone grader package.
+With the sibling DDSR-Bench checkout available, test compiled CritPt-AI inputs:
+
+```bash
+PYTHONPATH=../ddsr-bench \
+DDPR_TEST_CRITPT_TASKS=../ddsr-bench/tasks/critpt-ai \
+python -m pytest -q tests/rewards/test_compiled.py
+```
+
+These checks load private prepared-task references through DDSR-Bench's adapter.
+Tasks with `reference_check` equal to `matched`, `unresolved` or `different` are
+selected; known matches remain part of the regression coverage.
+They check input compatibility and rule grading of literal reference returns,
+including a missing-answer negative control. Nonliteral returns are explicitly
+skipped by the literal test. No corpus function is called and no model API is
+used by these tests.
+
+A separate static audit on 2026-09-30 accepted all ten compiled rule references:
+six previously `matched` and four `unresolved`. Three used literal rule checks;
+seven used Qwen3.8-Max equivalence assessment with code supplied only as text.
+No `different` case was available. Live controls rejected a wrong expression,
+accepted a semantic reference answer, and rejected an abstention. These results
+check assessment behavior, not answer-code execution or general judge accuracy.
+Private reports are retained under `data/physics-check/static-reference-20260930/`
+and excluded from Git.

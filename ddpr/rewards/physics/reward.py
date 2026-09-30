@@ -1,4 +1,4 @@
-"""Grade native Auto/Freestyle problems without using teacher completions."""
+"""Map physics grading results to DDPR training rewards."""
 
 from __future__ import annotations
 
@@ -11,11 +11,11 @@ from typing import Any
 
 from ddpr.rewards.base import Reward
 
-from ._core.evaluator import grade_response as _grade_response
-from ._core.inputs import parse_grading_problem
-from .equivalence import EquivalenceJudge
-from .schemas import GradeReport, GradingInput, ProblemGradingInput
-from .semantic import LLMSemanticJudge
+from .grader import grade_response
+from .inputs import parse_grading_problem
+from .llm.equivalence import EquivalenceJudge
+from .llm.semantic import LLMSemanticJudge
+from .schemas import GradeReport, GradingInput
 
 
 class PhysicsRewardError(RuntimeError):
@@ -31,42 +31,6 @@ class PhysicsRewardError(RuntimeError):
 
     def __reduce__(self):
         return type(self), (self.report, self.sample_id)
-
-
-def grade_response(
-    problem: GradingInput | Mapping[str, Any],
-    response: str,
-    *,
-    judge_enabled: bool = True,
-    equivalence_judge: EquivalenceJudge | None = None,
-    semantic_judge: LLMSemanticJudge | None = None,
-    attempt_id: str = "saved-response",
-) -> GradeReport:
-    """Return diagnostics, including unresolved grading with reward=None.
-
-    judge_enabled controls Auto's optional expression-equivalence fallback only.
-    Freestyle always requires SemanticJudge. Inject configured Judge instances to
-    override their environment settings or to test without network access.
-    """
-    if not isinstance(response, str):
-        raise TypeError("response must be text")
-    selected = parse_grading_problem(problem)
-    if isinstance(selected, ProblemGradingInput):
-        calls = selected.grading_plan.calls
-        if selected.answer_type == "composite" or len(calls) != 1:
-            raise ValueError(
-                "Auto composite/multi-target grading is not supported in DDPR"
-            )
-        if calls[0].primitive != selected.answer_type:
-            raise ValueError("Auto answer type must match its grading primitive")
-    return _grade_response(
-        selected,
-        response,
-        judge_enabled=judge_enabled if selected.problem_format == "auto" else True,
-        equivalence_judge=equivalence_judge,
-        semantic_judge=semantic_judge,
-        attempt_id=attempt_id,
-    )
 
 
 def load_problem(metadata: Mapping[str, Any]) -> GradingInput:
@@ -124,6 +88,16 @@ class PhysicsReward(Reward):
             semantic_judge=self.semantic_judge,
             attempt_id=sample_id or "student-response",
         )
-        if report.reward is None:
-            raise PhysicsRewardError(report=report, sample_id=sample_id)
-        return float(report.reward)
+        if report.grading_status == "pass":
+            return 1.0
+        if report.grading_status in {"fail", "resource_limit"}:
+            return 0.0
+        if report.grading_status == "not_graded" and report.extraction_status in {
+            "missing_answer_function",
+            "parse_failure",
+            "invalid_answer_format",
+            "unsafe_code",
+            "runtime_failure",
+        }:
+            return 0.0
+        raise PhysicsRewardError(report=report, sample_id=sample_id)

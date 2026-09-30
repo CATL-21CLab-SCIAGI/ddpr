@@ -7,12 +7,9 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
-from .primitives import (
-    GradingPlan,
-    GradingResult,
-    extract_gradeable_answer,
-    grade_with_plan,
-)
+from ..rules.plan import grade_with_plan
+from ..schemas import GradingPlan, GradingResult
+from .answers import extract_gradeable_answer
 
 DEFAULT_GRADER_TIMEOUT_SECONDS = 120.0
 

@@ -8,14 +8,53 @@ pytest.importorskip("pydantic")
 pytest.importorskip("sympy")
 
 from ddpr.rewards.physics import grade_response
-from ddpr.rewards.physics._core import bedrock, judge_backend
-from ddpr.rewards.physics._core.grading_runtime import GraderTimeout, run_with_deadline
-from ddpr.rewards.physics.equivalence import (
+from ddpr.rewards.physics.execution.runtime import GraderTimeout, run_with_deadline
+from ddpr.rewards.physics.llm.equivalence import (
     EquivalenceJudgeConfig,
     ExpressionEquivalenceJudge,
 )
-from ddpr.rewards.physics.schemas import CompletionResult
-from ddpr.rewards.physics.semantic import LLMSemanticJudge, SemanticJudgeConfig
+from ddpr.rewards.physics.llm.semantic import LLMSemanticJudge, SemanticJudgeConfig
+from ddpr.rewards.physics.schemas import (
+    CompletionResult,
+    FreestyleProblemGradingInput,
+    GradingCall,
+    PrimitiveGrade,
+)
+from ddpr.rewards.physics.transport import bedrock, client
+
+
+@pytest.mark.parametrize(
+    "confidence,resolution", [(0.89, "uncertain"), (0.9, "equivalent"), ("high", None)]
+)
+def test_equivalence_confidence_contract(confidence, resolution):
+    from pydantic import ValidationError
+
+    def complete(messages, _config):
+        assert "confidence must be a number from 0 to 1" in messages[1]["content"]
+        return json.dumps(
+            {
+                "verdict": "equivalent",
+                "confidence": confidence,
+                "rationale": "Mock comparison",
+                "assumptions_used": [],
+            }
+        )
+
+    judge = ExpressionEquivalenceJudge(
+        config=EquivalenceJudgeConfig(model="mock"), completion=complete
+    )
+    kwargs = {
+        "call": GradingCall(primitive="exact", target="answer", expected="2"),
+        "actual": "1+1",
+        "deterministic_grade": PrimitiveGrade(
+            primitive="exact", target="answer", passed=False, score=0.0
+        ),
+    }
+    if resolution is None:
+        with pytest.raises(ValidationError):
+            judge.judge(**kwargs)
+    else:
+        assert judge.judge(**kwargs).resolution == resolution
 
 
 def problem():
@@ -41,6 +80,69 @@ def correct():
     )
 
 
+@pytest.mark.parametrize("kind", ["semantic", "equivalence"])
+@pytest.mark.parametrize("structured", [False, True])
+def test_shared_completion_contract(monkeypatch, kind, structured):
+    from ddpr.rewards.physics.llm import equivalence, semantic
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Injected completion must bypass the default transport")
+
+    monkeypatch.setattr(semantic, "complete_judge", forbidden)
+    monkeypatch.setattr(equivalence, "complete_judge", forbidden)
+    calls = []
+    payload = (
+        correct()
+        if kind == "semantic"
+        else json.dumps(
+            {
+                "verdict": "equivalent",
+                "confidence": 0.99,
+                "rationale": "Mock equivalence",
+                "assumptions_used": [],
+            }
+        )
+    )
+
+    def complete(messages, config):
+        calls.append((messages, config))
+        if not structured:
+            return payload
+        return CompletionResult(
+            content=payload,
+            model="served-model",
+            response_id="request-1",
+            usage={"total_tokens": 12},
+        )
+
+    if kind == "semantic":
+        judge = LLMSemanticJudge(
+            config=SemanticJudgeConfig(model="configured-model"), completion=complete
+        )
+        result = judge.judge(
+            FreestyleProblemGradingInput.model_validate(problem()), "E=2"
+        )
+        assert result.verdict == "correct"
+    else:
+        judge = ExpressionEquivalenceJudge(
+            config=EquivalenceJudgeConfig(model="configured-model"), completion=complete
+        )
+        result = judge.judge(
+            call=GradingCall(primitive="exact", target="answer", expected="2"),
+            actual="1+1",
+            deterministic_grade=PrimitiveGrade(
+                primitive="exact", target="answer", passed=False, score=0.0
+            ),
+        )
+        assert result.resolution == "equivalent"
+    assert len(calls) == 1
+    assert calls[0][1] is judge.config
+    assert [message["role"] for message in calls[0][0]] == ["system", "user"]
+    assert result.model == ("served-model" if structured else "configured-model")
+    assert result.response_id == ("request-1" if structured else None)
+    assert result.usage == ({"total_tokens": 12} if structured else None)
+
+
 def test_semantic_schema_repair_is_bounded():
     responses = iter(["invalid", correct()])
     prompts = []
@@ -52,7 +154,9 @@ def test_semantic_schema_repair_is_bounded():
     judge = LLMSemanticJudge(
         config=SemanticJudgeConfig(model="mock"), completion=complete
     )
-    assert grade_response(problem(), "E=2", semantic_judge=judge).reward == 1
+    assert (
+        grade_response(problem(), "E=2", semantic_judge=judge).grading_status == "pass"
+    )
     assert len(prompts) == 2
     assert prompts[1][-2] == {"role": "assistant", "content": "invalid"}
     assert "schema" in prompts[1][-1]["content"]
@@ -72,7 +176,7 @@ def test_semantic_failures_remain_unresolved(mode):
         config=SemanticJudgeConfig(model="mock"), completion=complete
     )
     report = grade_response(problem(), "E=2", semantic_judge=judge)
-    assert report.reward is None
+    assert "reward" not in report.model_dump()
     assert report.grading_status == "grader_error"
     assert len(calls) == (1 if mode == "api" else 2)
 
@@ -93,7 +197,7 @@ def test_openai_equivalence_transport(monkeypatch):
             )
         )
 
-    monkeypatch.setattr(judge_backend.OpenAIChatBackend, "complete", complete)
+    monkeypatch.setattr(client.OpenAIChatBackend, "complete", complete)
     judge = ExpressionEquivalenceJudge(
         config=EquivalenceJudgeConfig(
             backend="openai",
@@ -123,7 +227,7 @@ def test_openai_equivalence_transport(monkeypatch):
         "```python\ndef answer(x):\n    return x+2\n```",
         equivalence_judge=judge,
     )
-    assert report.reward == 0
+    assert report.grading_status == "fail"
     assert captured["config"].base_url == "http://localhost:8000/v1"
     assert captured["generation"].extra_body["response_format"] == {
         "type": "json_object"
@@ -178,7 +282,9 @@ def test_bedrock_semantic_transport(monkeypatch):
             reasoning_effort="high",
         )
     )
-    assert grade_response(problem(), "E=2", semantic_judge=judge).reward == 1
+    assert (
+        grade_response(problem(), "E=2", semantic_judge=judge).grading_status == "pass"
+    )
     assert captured["authorization"] == "Bearer mock-key"
     assert "us-east-1" in captured["url"]
     assert captured["body"]["reasoning"] == {"effort": "high"}

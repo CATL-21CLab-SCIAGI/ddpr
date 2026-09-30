@@ -2,6 +2,7 @@ import asyncio
 import importlib.util
 import json
 import pickle
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -17,15 +18,56 @@ from ddpr.rewards.physics import (
     PhysicsReward,
     PhysicsRewardError,
     grade_response,
+    grader,
     load_problem,
 )
-from ddpr.rewards.physics._core import evaluator, primitives
-from ddpr.rewards.physics._core.grading_runtime import GraderTimeout
-from ddpr.rewards.physics.equivalence import (
+from ddpr.rewards.physics.execution import answers
+from ddpr.rewards.physics.execution.runtime import GraderTimeout
+from ddpr.rewards.physics.llm.equivalence import (
     EquivalenceJudgeConfig,
     ExpressionEquivalenceJudge,
 )
-from ddpr.rewards.physics.semantic import LLMSemanticJudge, SemanticJudgeConfig
+from ddpr.rewards.physics.llm.semantic import LLMSemanticJudge, SemanticJudgeConfig
+from ddpr.rewards.physics.schemas import GradeReport
+
+
+@pytest.mark.parametrize(
+    "status,extraction,expected",
+    [
+        ("pass", "success", 1.0),
+        ("fail", "success", 0.0),
+        ("resource_limit", "success", 0.0),
+        ("not_graded", "missing_answer_function", 0.0),
+        ("not_graded", "parse_failure", 0.0),
+        ("not_graded", "invalid_answer_format", 0.0),
+        ("not_graded", "unsafe_code", 0.0),
+        ("not_graded", "runtime_failure", 0.0),
+        ("not_graded", "not_attempted", None),
+        ("grader_error", "success", None),
+        ("grader_uncertain", "success", None),
+        ("infrastructure_error", "not_attempted", None),
+    ],
+)
+def test_reward_mapping(monkeypatch, status, extraction, expected):
+    from ddpr.rewards.physics import reward
+
+    report = GradeReport(
+        problem_id="test",
+        answer_type="exact",
+        raw_response="",
+        response_sha256="",
+        extraction_status=extraction,
+        grading_status=status,
+        passed=status == "pass",
+    )
+    monkeypatch.setattr(reward, "grade_response", lambda *args, **kwargs: report)
+    assert "reward" not in report.model_dump()
+    if expected is None:
+        with pytest.raises(PhysicsRewardError) as raised:
+            score(PhysicsReward(), auto_problem(), "")
+        assert raised.value.report is report
+    else:
+        assert score(PhysicsReward(), auto_problem(), "") == expected
 
 
 def auto_problem(kind="exact", expected="sqrt(3)/2", args=None):
@@ -68,7 +110,7 @@ def block(expression):
 
 
 def forbidden_judge():
-    def complete(_messages):
+    def complete(_messages, _config):
         pytest.fail("This answer must not call the equivalence Judge")
 
     return ExpressionEquivalenceJudge(
@@ -77,7 +119,7 @@ def forbidden_judge():
 
 
 def equivalence(verdict="equivalent", prompts=None):
-    def complete(messages):
+    def complete(messages, _config):
         if prompts is not None:
             prompts.append(messages)
         return json.dumps(
@@ -151,7 +193,7 @@ def test_expanded_vocabulary_passes_without_judge(expression, expected):
         block(expression),
         equivalence_judge=forbidden_judge(),
     )
-    assert report.reward == 1
+    assert report.grading_status == "pass"
     assert not report.equivalence_judgments
 
 
@@ -162,14 +204,20 @@ def test_variable_assumptions_and_categorical_aliases():
         {"variables": ["x"], "variable_assumptions": {"x": {"positive": True}}},
     )
     assert (
-        grade_response(problem, block("sp.sqrt(x*x)"), judge_enabled=False).reward == 1
+        grade_response(
+            problem, block("sp.sqrt(x*x)"), judge_enabled=False
+        ).grading_status
+        == "pass"
     )
     problem = auto_problem(
         "categorical",
         ["A"],
         {"choices": ["A", "B"], "allowed_aliases": {"alpha": "A"}},
     )
-    assert grade_response(problem, block("{'alpha'}"), judge_enabled=False).reward == 1
+    assert (
+        grade_response(problem, block("{'alpha'}"), judge_enabled=False).grading_status
+        == "pass"
+    )
 
 
 @pytest.mark.parametrize(
@@ -186,7 +234,7 @@ def test_invalid_student_response_is_zero(response, status):
     report = grade_response(
         auto_problem(), response, equivalence_judge=forbidden_judge()
     )
-    assert report.reward == 0
+    assert report.grading_status == "not_graded"
     assert report.extraction_status == status
 
 
@@ -196,7 +244,7 @@ def test_floating_expression_is_not_silently_rounded():
         block("sp.Rational(5,4)"),
         equivalence_judge=forbidden_judge(),
     )
-    assert report.reward == 0
+    assert report.grading_status == "not_graded"
     assert report.extraction_status == "invalid_answer_format"
 
 
@@ -204,7 +252,7 @@ def test_unsupported_sympy_is_inert_but_can_reach_judge(monkeypatch):
     def forbidden(*args):
         pytest.fail("Unsupported code was executed")
 
-    monkeypatch.setattr(primitives, "_execute_answer_code", forbidden)
+    monkeypatch.setattr(answers, "_execute_answer_code", forbidden)
     prompts = []
     scorer = PhysicsReward(equivalence_judge=equivalence(prompts=prompts))
     problem = auto_problem("symbolic", "fresnels(x)", {"variables": ["x"]})
@@ -224,11 +272,11 @@ def test_unresolved_is_exception_not_zero(monkeypatch, failure):
         def timeout(*args, **kwargs):
             raise GraderTimeout
 
-        monkeypatch.setattr(evaluator, "run_with_deadline", timeout)
+        monkeypatch.setattr(grader, "run_with_deadline", timeout)
     judge = equivalence("uncertain")
     if failure == "api":
 
-        def unavailable(_messages):
+        def unavailable(_messages, _config):
             raise TimeoutError("mock provider timeout")
 
         judge = ExpressionEquivalenceJudge(
@@ -240,7 +288,7 @@ def test_unresolved_is_exception_not_zero(monkeypatch, failure):
     with pytest.raises(PhysicsRewardError) as raised:
         score(scorer, problem, block("sp.fresnels(x)"))
     error = raised.value
-    assert error.report.reward is None
+    assert "reward" not in error.report.model_dump()
     assert error.report.grading_status in {"grader_error", "grader_uncertain"}
     restored = pickle.loads(pickle.dumps(error))
     assert restored.sample_id == "training-sample:1"
@@ -277,6 +325,15 @@ def test_freestyle_uncertain_and_empty_response():
     with pytest.raises(PhysicsRewardError):
         score(scorer, freestyle_problem(), "Maybe stable")
     assert score(scorer, freestyle_problem(), "") == 0
+
+
+@pytest.mark.parametrize("verdict", ["correct", "incorrect", "uncertain"])
+def test_report_round_trip_preserves_judgment(verdict):
+    report = grade_response(
+        freestyle_problem(), "E=2; stable.", semantic_judge=semantic(verdict)
+    )
+    assert GradeReport.model_validate_json(report.model_dump_json()) == report
+    assert pickle.loads(pickle.dumps(report)) == report
 
 
 def test_reference_completion_cannot_override_ground_truth():
@@ -336,6 +393,46 @@ def test_bad_or_composite_contract_is_not_a_training_score():
         grade_response(problem, block("1"))
 
 
+@pytest.mark.parametrize("response", [None, 42, [], b"answer"])
+def test_nontext_response_is_rejected_before_execution(monkeypatch, response):
+    def forbidden(*args, **kwargs):
+        pytest.fail("Invalid input reached execution")
+
+    monkeypatch.setattr(grader, "run_with_deadline", forbidden)
+    with pytest.raises(TypeError, match="response must be text"):
+        grade_response(auto_problem(), response)
+
+
+def test_grading_can_be_relocated_without_ddpr(tmp_path):
+    source = Path(grader.__file__).parent
+    target = tmp_path / "standalone_physics"
+    shutil.copytree(
+        source,
+        target,
+        ignore=shutil.ignore_patterns("reward.py", "__pycache__", ".DS_Store"),
+    )
+    # Integration supplies its own exports, excluding DDPR's reward adapter.
+    (target / "__init__.py").write_text("", encoding="utf-8")
+    script = """
+import json
+import sys
+sys.path.insert(0, sys.argv[1])
+from standalone_physics.grader import grade_response
+from standalone_physics.inputs import parse_grading_problem
+problem = parse_grading_problem(json.loads(sys.argv[2]))
+report = grade_response(problem, "", judge_enabled=False)
+assert report.extraction_status == "missing_answer_function"
+assert "reward" not in report.model_dump()
+assert not any(name == "ddpr" or name.startswith("ddpr.") for name in sys.modules)
+"""
+    subprocess.run(
+        [sys.executable, "-I", "-c", script, str(tmp_path), json.dumps(auto_problem())],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
 def test_zero_argument_reward_loads_with_environment(monkeypatch):
     monkeypatch.setenv("DDPR_PHYSICS_EQUIVALENCE_JUDGE", "false")
     load_reward.cache_clear()
@@ -383,11 +480,10 @@ def test_slime_reward_calls_real_grader_from_worker_thread(monkeypatch):
     ]
 
 
-def test_five_named_comparison_modules():
-    from ddpr.rewards.physics.categorical import grade_categorical
-    from ddpr.rewards.physics.exact import grade_exact
-    from ddpr.rewards.physics.floating import grade_floating_numeric
-    from ddpr.rewards.physics.symbolic import grade_symbolic
+def test_rule_comparisons():
+    from ddpr.rewards.physics.rules.categorical import grade_categorical
+    from ddpr.rewards.physics.rules.numeric import grade_exact, grade_floating_numeric
+    from ddpr.rewards.physics.rules.symbolic import grade_symbolic
 
     assert grade_exact("sqrt(4)", "2").passed
     assert grade_symbolic("x+x", "2*x", {"variables": ["x"]}).passed

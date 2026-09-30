@@ -4,6 +4,8 @@ import json
 import re
 from typing import Any
 
+from ..schemas import CompletionResult
+
 _JSON_FENCE = re.compile(
     r"```json\s*(.*?)\s*```",
     flags=re.IGNORECASE | re.DOTALL,
@@ -162,3 +164,13 @@ def _strip_trailing_commas(content: str) -> str:
         result.append(character)
 
     return "".join(result)
+
+
+def normalize_result(
+    value: str | CompletionResult,
+) -> CompletionResult:
+    if isinstance(value, CompletionResult):
+        return value
+    if isinstance(value, str):
+        return CompletionResult(content=value)
+    raise TypeError("Judge completion returned an unsupported value")

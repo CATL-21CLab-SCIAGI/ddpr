@@ -6,12 +6,13 @@ import signal
 import threading
 import time
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from pydantic import BaseModel, ConfigDict
+
+from .config import load_dotenv
 
 BEDROCK_API_KEY_ENV = "AWS_BEDROCK_API_KEY"
 AWS_BEDROCK_BEARER_ENV = "AWS_BEARER_TOKEN_BEDROCK"
@@ -30,25 +31,6 @@ class BedrockRunResult(BaseModel):
 
 class _BedrockWallClockTimeout(TimeoutError):
     pass
-
-
-def load_dotenv(path: Path | None = None) -> None:
-    source = path or Path.cwd() / ".env"
-    if not source.exists():
-        return
-    for raw_line in source.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        if line.startswith("export "):
-            line = line.removeprefix("export ").strip()
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-            value = value[1:-1]
-        if key:
-            os.environ.setdefault(key, value)
 
 
 def require_bedrock_api_key() -> str:

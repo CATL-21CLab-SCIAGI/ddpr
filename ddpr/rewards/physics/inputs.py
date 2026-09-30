@@ -53,10 +53,3 @@ def parse_grading_problem(
         else ProblemGradingInput
     )
     return schema.model_validate(problem)
-
-
-def validate_judge_mode(problem: GradingInput, *, judge_enabled: bool) -> None:
-    if problem.problem_format == "freestyle" and not judge_enabled:
-        raise ValueError(
-            "Freestyle grading requires SemanticJudge; --no-judge is Auto-only"
-        )

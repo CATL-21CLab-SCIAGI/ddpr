@@ -3,22 +3,27 @@ from __future__ import annotations
 import inspect
 import json
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .bedrock import BedrockRunResult, load_dotenv
-from .judge_backend import JudgeBackendConfig, complete_judge, transport_from_env
-from .llm_io import extract_json_object
-from .primitives import GradingCall, PrimitiveGrade, UnexecutedAnswer
-from .schemas import CompletionResult, EquivalenceJudgment
+from ..schemas import (
+    EquivalenceJudgment,
+    GradingCall,
+    PrimitiveGrade,
+    UnexecutedAnswer,
+)
+from ..transport.client import complete_judge
+from ..transport.config import (
+    Completion,
+    JudgeBackendConfig,
+    load_dotenv,
+    transport_from_env,
+)
+from .parsing import extract_json_object, normalize_result
 
 DEFAULT_JUDGE_MODEL = "openai.gpt-5.6-sol"
-EquivalenceCompletion = Callable[
-    [list[dict[str, str]]],
-    str | BedrockRunResult | CompletionResult,
-]
 
 
 class EquivalenceJudgeConfig(JudgeBackendConfig):
@@ -124,10 +129,10 @@ class ExpressionEquivalenceJudge:
         self,
         *,
         config: EquivalenceJudgeConfig | None = None,
-        completion: EquivalenceCompletion | None = None,
+        completion: Completion | None = None,
     ) -> None:
         self.config = config or EquivalenceJudgeConfig.from_env()
-        self.completion = completion
+        self._completion = completion
 
     def judge(
         self,
@@ -167,21 +172,12 @@ class ExpressionEquivalenceJudge:
         if isinstance(actual, UnexecutedAnswer):
             payload["unexecuted_answer_code"] = actual.answer_code
         messages = _equivalence_messages(payload)
-        result = self._complete(messages)
-        if isinstance(result, str):
-            content = result
-            response_id = None
-            usage = None
-            model = self.config.model
-        else:
-            content = result.content or ""
-            response_id = result.response_id
-            usage = result.usage
-            model = (
-                result.model
-                if isinstance(result, CompletionResult) and result.model
-                else self.config.model
-            )
+        complete = self._completion or complete_judge
+        result = normalize_result(complete(messages, self.config))
+        content = result.content or ""
+        response_id = result.response_id
+        usage = result.usage
+        model = result.model or self.config.model
         if not content.strip():
             raise RuntimeError("ExpressionEquivalenceJudge returned no content")
 
@@ -219,14 +215,6 @@ class ExpressionEquivalenceJudge:
             usage=usage,
         )
 
-    def _complete(
-        self,
-        messages: list[dict[str, str]],
-    ) -> str | BedrockRunResult | CompletionResult:
-        if self.completion is not None:
-            return self.completion(messages)
-        return complete_judge(messages, self.config)
-
 
 def _equivalence_messages(payload: dict[str, Any]) -> list[dict[str, str]]:
     return [
@@ -254,7 +242,9 @@ def _equivalence_messages(payload: dict[str, Any]) -> list[dict[str, str]]:
                 "Determine whether these expressions are mathematically "
                 "equivalent. Return exactly one JSON object with verdict "
                 "(equivalent, not_equivalent, or uncertain), confidence, "
-                "rationale, and assumptions_used. assumptions_used must be an "
+                "rationale, and assumptions_used. confidence must be a number "
+                "from 0 to 1, not a label such as high or low. "
+                "assumptions_used must be an "
                 "array of short strings; use [] when no assumptions are needed. "
                 "Keep rationale to the decisive algebraic transformation.\n\n"
                 "Input:\n" + json.dumps(payload, indent=2, ensure_ascii=False)

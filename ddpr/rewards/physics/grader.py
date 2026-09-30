@@ -1,3 +1,5 @@
+"""Assess physics responses independently of the training reward contract."""
+
 from __future__ import annotations
 
 import hashlib
@@ -6,60 +8,65 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
-from .equivalence import (
-    EquivalenceJudge,
-    EquivalenceJudgeConfig,
-    ExpressionEquivalenceJudge,
-    judge_equivalence,
-)
-from .grading_runtime import (
+from .execution.answers import extract_gradeable_answer
+from .execution.runtime import (
     AnswerExtractionError,
     extract_answer_locally,
     grader_timeout_seconds,
     run_with_deadline,
 )
-from .grading_runtime import (
+from .execution.runtime import (
     GraderTimeout as _GraderTimeout,
 )
-from .inputs import parse_grading_problem, validate_judge_mode
-from .primitives import (
-    ExactNumericComparison,
-    PrimitiveGrade,
-    UnexecutedAnswer,
-    compare_exact_numerically,
-    compose_grades,
-    extract_gradeable_answer,
-    grade_with_plan,
+from .inputs import parse_grading_problem
+from .llm.equivalence import (
+    EquivalenceJudge,
+    ExpressionEquivalenceJudge,
+    judge_equivalence,
 )
+from .llm.semantic import LLMSemanticJudge
+from .rules.numeric import compare_exact_numerically
+from .rules.plan import compose_grades, grade_with_plan
 from .schemas import (
+    ExactNumericComparison,
     FreestyleProblemGradingInput,
     GradeReport,
     GradingInput,
-    ProblemFormatSelection,
+    PrimitiveGrade,
+    ProblemGradingInput,
+    UnexecutedAnswer,
 )
-from .semantic import LLMSemanticJudge, SemanticJudgeConfig
 
 
 def grade_response(
     problem: GradingInput | Mapping[str, Any],
     response: str,
     *,
-    equivalence_judge: EquivalenceJudge | None = None,
-    judge_config: EquivalenceJudgeConfig | None = None,
     judge_enabled: bool = True,
-    problem_format: ProblemFormatSelection = "detect",
+    equivalence_judge: EquivalenceJudge | None = None,
     semantic_judge: LLMSemanticJudge | None = None,
-    semantic_judge_config: SemanticJudgeConfig | None = None,
     attempt_id: str = "saved-response",
 ) -> GradeReport:
-    selected_problem = parse_grading_problem(problem, problem_format=problem_format)
-    validate_judge_mode(selected_problem, judge_enabled=judge_enabled)
+    """Return grading diagnostics without assigning a training reward.
+
+    judge_enabled controls Auto's optional expression-equivalence fallback only.
+    Freestyle always requires SemanticJudge. Inject configured Judge instances to
+    override their environment settings or to test without network access.
+    """
+    if not isinstance(response, str):
+        raise TypeError("response must be text")
+    selected_problem = parse_grading_problem(problem)
+    if isinstance(selected_problem, ProblemGradingInput):
+        calls = selected_problem.grading_plan.calls
+        if selected_problem.answer_type == "composite" or len(calls) != 1:
+            raise ValueError("Auto composite/multi-target grading is not supported")
+        if calls[0].primitive != selected_problem.answer_type:
+            raise ValueError("Auto answer type must match its grading primitive")
     if isinstance(selected_problem, FreestyleProblemGradingInput):
         return _grade_freestyle_response(
             selected_problem,
             response,
             semantic_judge=semantic_judge,
-            semantic_judge_config=semantic_judge_config,
             attempt_id=attempt_id,
         )
     response_hash = hashlib.sha256(response.encode("utf-8")).hexdigest()
@@ -217,7 +224,7 @@ def grade_response(
                 uncertain_indexes.add(index)
             continue
         if selected_judge is None:
-            selected_judge = ExpressionEquivalenceJudge(config=judge_config)
+            selected_judge = ExpressionEquivalenceJudge()
         try:
             judgment = judge_equivalence(
                 selected_judge,
@@ -319,7 +326,6 @@ def _grade_freestyle_response(
     response: str,
     *,
     semantic_judge: LLMSemanticJudge | None,
-    semantic_judge_config: SemanticJudgeConfig | None,
     attempt_id: str,
 ) -> GradeReport:
     common = {
@@ -339,9 +345,7 @@ def _grade_freestyle_response(
             error_message="Solver supplied no final response.",
         )
     try:
-        selected_judge = semantic_judge or LLMSemanticJudge(
-            config=semantic_judge_config
-        )
+        selected_judge = semantic_judge or LLMSemanticJudge()
         judgment = selected_judge.judge(problem, response, attempt_id=attempt_id)
     except Exception as exc:
         return GradeReport(

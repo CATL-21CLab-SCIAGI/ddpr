@@ -2,19 +2,22 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .bedrock import load_dotenv
-from .judge_backend import JudgeBackendConfig, complete_judge, transport_from_env
-from .llm_io import extract_json_object
-from .schemas import (
-    CompletionResult,
+from ..schemas import (
     FreestyleProblemGradingInput,
     SemanticJudgment,
 )
+from ..transport.client import complete_judge
+from ..transport.config import (
+    Completion,
+    JudgeBackendConfig,
+    load_dotenv,
+    transport_from_env,
+)
+from .parsing import extract_json_object, normalize_result
 
 
 class SemanticJudgeConfig(JudgeBackendConfig):
@@ -61,18 +64,12 @@ class _JudgeResponse(BaseModel):
     substantive_errors: list[str] = Field(default_factory=list)
 
 
-SemanticJudgeCompletion = Callable[
-    [list[dict[str, str]], SemanticJudgeConfig],
-    str | CompletionResult,
-]
-
-
 class LLMSemanticJudge:
     def __init__(
         self,
         *,
         config: SemanticJudgeConfig | None = None,
-        completion: SemanticJudgeCompletion | None = None,
+        completion: Completion | None = None,
     ) -> None:
         self.config = config or SemanticJudgeConfig.from_env()
         self._completion = completion
@@ -92,7 +89,7 @@ class LLMSemanticJudge:
         complete = self._completion or complete_judge
         last_error: Exception | None = None
         for schema_attempt in (1, 2):
-            result = _normalize_result(complete(current_messages, self.config))
+            result = normalize_result(complete(current_messages, self.config))
             try:
                 payload = extract_json_object(
                     result.content or "",
@@ -198,13 +195,3 @@ assessment, and substantive_errors."""
             "content": json.dumps(payload, indent=2, ensure_ascii=False),
         },
     ]
-
-
-def _normalize_result(
-    value: str | CompletionResult,
-) -> CompletionResult:
-    if isinstance(value, CompletionResult):
-        return value
-    if isinstance(value, str):
-        return CompletionResult(content=value)
-    raise TypeError("Judge completion returned an unsupported value")

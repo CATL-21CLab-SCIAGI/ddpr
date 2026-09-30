@@ -18,7 +18,7 @@ physics = ["pydantic>=2.10", "sympy>=1.13"]
 include = ["ddpr*"]
 
 [tool.setuptools.package-data]
-"ddpr.rewards.physics._core" = ["LICENSE", "UPSTREAM.md"]
+"ddpr.rewards.physics" = ["LICENSE", "UPSTREAM.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -29,8 +29,16 @@ line-length = 88
 target-version = "py312"
 
 [tool.ruff.lint.per-file-ignores]
-# Preserve the upstream snapshot's exception classification and sandbox behavior.
-"ddpr/rewards/physics/_core/*.py" = [
-  "BLE001", "C408", "FURB136", "S102", "S110", "SIM101", "SIM102",
-  "SIM114", "SIM117", "TRY004", "TRY201", "UP037", "UP041",
-]
+# Preserve upstream exception classification and answer-code restrictions.
+"ddpr/rewards/physics/grader.py" = ["BLE001"]
+"ddpr/rewards/physics/transport/bedrock.py" = ["SIM117", "TRY004"]
+"ddpr/rewards/physics/llm/equivalence.py" = ["C408", "UP037"]
+"ddpr/rewards/physics/transport/openai.py" = ["UP037", "UP041"]
+"ddpr/rewards/physics/llm/parsing.py" = ["TRY201"]
+"ddpr/rewards/physics/llm/semantic.py" = ["BLE001", "UP037"]
+"ddpr/rewards/physics/transport/config.py" = ["TRY004"]
+"ddpr/rewards/physics/execution/answers.py" = ["S102", "TRY004"]
+"ddpr/rewards/physics/execution/runtime.py" = ["BLE001"]
+"ddpr/rewards/physics/rules/expressions.py" = ["SIM101", "SIM102", "TRY004"]
+"ddpr/rewards/physics/rules/numeric.py" = ["BLE001", "FURB136"]
+"ddpr/rewards/physics/rules/symbolic.py" = ["BLE001", "S110"]
