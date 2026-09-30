@@ -16,7 +16,8 @@ from ...schemas import CompletionResult
 class ClientConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    backend: Literal["bedrock", "openai"] = "bedrock"
+    backend: Literal["bedrock", "openai", "ddsr"] = "bedrock"
+    provider: Literal["vllm", "openai", "aliyun", "bedrock"] = "vllm"
     model: str = "openai.gpt-5.6-sol"
     region: str = "us-east-1"
     max_tokens: int = Field(default=16000, ge=1)
@@ -48,6 +49,7 @@ def client_from_env(prefix: str) -> dict[str, Any]:
     }
 
     for field in (
+        "provider",
         "model",
         "region",
         "max_tokens",

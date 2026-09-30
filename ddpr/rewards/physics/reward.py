@@ -11,6 +11,7 @@ from typing import Any
 
 from ddpr.rewards.base import Reward
 
+from .critpt_ai.inputs import load_problem as load_task_problem
 from .critpt_ai.inputs import parse_grading_problem
 from .critpt_ai.schemas import GradeReport, GradingInput
 from .grader import grade_response
@@ -37,18 +38,23 @@ def load_problem(metadata: Mapping[str, Any]) -> GradingInput:
     """Load exactly one canonical problem from private training metadata."""
     if not isinstance(metadata, Mapping):
         raise TypeError("metadata must be a mapping")
-    keys = [key for key in ("problem", "problem_path") if key in metadata]
+    keys = [key for key in ("problem", "problem_path", "task_path") if key in metadata]
     if len(keys) != 1:
-        raise ValueError("metadata must provide exactly one of problem or problem_path")
+        raise ValueError(
+            "metadata must provide exactly one of problem, problem_path, or task_path"
+        )
     if keys[0] == "problem":
         payload = metadata["problem"]
     else:
-        path = metadata["problem_path"]
+        key = keys[0]
+        path = metadata[key]
         if not isinstance(path, str):
-            raise TypeError("metadata.problem_path must be an absolute path string")
+            raise TypeError(f"metadata.{key} must be an absolute path string")
         source = Path(path)
         if not source.is_absolute():
-            raise ValueError("metadata.problem_path must be absolute on every worker")
+            raise ValueError(f"metadata.{key} must be absolute on every worker")
+        if key == "task_path":
+            return load_task_problem(source)
         with source.open(encoding="utf-8") as stream:
             payload = json.load(stream)
     if not isinstance(payload, Mapping):

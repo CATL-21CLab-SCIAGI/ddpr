@@ -16,6 +16,8 @@ Pass exactly one source in the existing sample metadata:
 metadata = {"problem": native_problem_json}
 # Or, on shared storage mounted at the same path on every worker:
 metadata = {"problem_path": "/mnt/nas/corpus/example/problem.json"}
+# Or a compiled Harbor CritPt-AI task, using DDSR-Bench:
+metadata = {"task_path": "/mnt/nas/tasks/critpt-ai/example"}
 ```
 
 Paths are read when scoring; keep those files immutable for reproducible runs.
@@ -143,10 +145,44 @@ Both judges accept `completion=complete`, where the synchronous callable has the
 signature `complete(messages, config) -> str | CompletionResult`. It replaces
 provider calls without changing prompts, parsing or grading policy. Return
 `CompletionResult` from `physics.schemas` to retain model, request ID and usage.
-The caller owns any injected client's lifecycle. Future DDSR-Bench integration
-can supply this callable; asynchronous clients need an explicit synchronous
-adapter, not a coroutine passed directly. The previous one-argument equivalence
-callback and provider-specific return type are replaced by this shared contract.
+The caller owns any injected client's lifecycle.
+
+The added `ddsr` backend uses DDSR-Bench generation clients through the normal
+client dispatcher. Existing `openai` and `bedrock` behavior remains unchanged.
+Install the sibling checkout and optional dependencies:
+
+```bash
+python -m pip install -e ../ddsr-bench -e '.[physics,ddsr]'
+```
+
+For example, configure the Freestyle judge on every worker:
+
+```bash
+export AUTO_CRITPT_GRADER_SEMANTIC_JUDGE_BACKEND=ddsr
+export AUTO_CRITPT_GRADER_SEMANTIC_JUDGE_PROVIDER=vllm
+export AUTO_CRITPT_GRADER_SEMANTIC_JUDGE_MODEL=your-judge-model
+export AUTO_CRITPT_GRADER_SEMANTIC_JUDGE_BASE_URL=http://localhost:8000/v1
+export AUTO_CRITPT_GRADER_SEMANTIC_JUDGE_API_KEY_ENV=
+export AUTO_CRITPT_GRADER_SEMANTIC_JUDGE_REASONING_EFFORT=
+```
+
+Use the `AUTO_CRITPT_GRADER_JUDGE_` prefix for the equivalence judge.
+With `BACKEND=ddsr`, `PROVIDER` selects `vllm`, `openai`, `aliyun` or `bedrock`.
+DDSR-Bench owns HTTP requests, response parsing and retries; DDPR bridges its
+async client to synchronous grading and keeps reasoning separate from visible
+judgments. Each request closes its client. `HTTP_BACKOFF_SECONDS` does not apply
+to this backend, and nonempty `EXTRA_BODY_JSON` is rejected. JSON judgments
+are requested through prompts, without forcing provider-specific JSON mode.
+
+`BACKEND=bedrock` retains its Responses API implementation;
+`BACKEND=ddsr` with `PROVIDER=bedrock` uses DDSR-Bench Chat Completions.
+The external Auto-CritPt problem/report interfaces remain unchanged.
+
+For `task_path`, DDPR adapts the compiled instructions and private references
+in `critpt_ai/inputs.py`, using DDSR-Bench's task decoder and prompt definitions.
+It does not execute corpus code or require the original corpus. For offline
+grading, `critpt_ai.inputs.load_problems(task_dirs)` loads an explicit list of
+task directories in order; each entry uses the same validation.
 
 ## Verification
 
@@ -170,7 +206,7 @@ DDPR_TEST_CRITPT_TASKS=../ddsr-bench/tasks/critpt-ai \
 python -m pytest -q tests/rewards/test_compiled.py
 ```
 
-These checks load private prepared-task references through DDSR-Bench's adapter.
+These checks load private prepared-task references through DDPR's input adapter.
 Tasks with `reference_check` equal to `matched`, `unresolved` or `different` are
 selected; known matches remain part of the regression coverage.
 They check input compatibility and rule grading of literal reference returns,

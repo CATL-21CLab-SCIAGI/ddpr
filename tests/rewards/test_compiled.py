@@ -11,7 +11,7 @@ pytest.importorskip("pydantic")
 pytest.importorskip("sympy")
 
 from ddpr.rewards.physics import PhysicsReward, PhysicsRewardError, grade_response
-from ddpr.rewards.physics.critpt_ai.inputs import parse_grading_problem
+from ddpr.rewards.physics.critpt_ai.inputs import load_problem
 from ddpr.rewards.physics.llm.semantic import LLMSemanticJudge, SemanticJudgeConfig
 from ddpr.rewards.physics.rule.compare import grade_with_plan
 
@@ -40,10 +40,8 @@ def _tasks():
 
 @pytest.mark.parametrize("task", _tasks())
 def test_compiled_literal_reference(task):
-    from ddsr_bench.benchmarks.critpt.evaluation.judge import load_problem
-
-    native = load_problem(task)
-    if "grading_plan" not in native:
+    problem = load_problem(task)
+    if problem.problem_format != "auto":
         pytest.skip("Freestyle references require semantic assessment")
     reference = json.loads((task / "tests/reference.json").read_text(encoding="utf-8"))
     # Read a return literal; never import or invoke the saved answer function.
@@ -60,7 +58,6 @@ def test_compiled_literal_reference(task):
         actual = ast.literal_eval(returned.value)
     except (ValueError, TypeError):
         pytest.skip("Nonliteral reference: separate static LLM assessment required")
-    problem = parse_grading_problem(native)
     result = grade_with_plan({"answer": actual}, problem.grading_plan)
     assert result.passed, result.model_dump()
     # A missing target must not inherit the reference's passing result.
@@ -69,11 +66,12 @@ def test_compiled_literal_reference(task):
 
 @pytest.mark.parametrize("task", _tasks())
 def test_compiled_problem(task):
-    from ddsr_bench.benchmarks.critpt.evaluation.judge import load_problem
-
     problem = load_problem(task)
-    metadata = {"problem": problem}
-    if "grading_plan" in problem:
+    from ddpr.rewards.physics import load_problem as load_reward_problem
+
+    metadata = {"task_path": str(task.resolve())}
+    assert load_reward_problem(metadata) == problem
+    if problem.problem_format == "auto":
         # Check real contracts without executing downloaded answer code.
         report = grade_response(problem, "", judge_enabled=False)
         assert report.extraction_status == "missing_answer_function"
@@ -125,7 +123,6 @@ def test_compiled_problem(task):
             assert scorer(**kwargs) == expected
         payload = json.loads(prompts[0][1]["content"])
         assert (
-            payload["private_reference"]["reference_answer"]
-            == problem["reference_answer"]
+            payload["private_reference"]["reference_answer"] == problem.reference_answer
         )
         assert "UNVERIFIED_TEACHER" not in json.dumps(prompts)

@@ -118,7 +118,14 @@ by its responsibility and consumers, not its upstream origin: grading plans and
 the `answer()` convention are not CritPt-AI-specific. Judges consume shared types
 or explicit public/reference data, not native problem models. The public
 `grade_response` entry point and reward loader retain the native I/O boundary.
-DDSR-Bench input/output adapters and client integration are deferred until integration; do not introduce speculative shared interfaces.
+DDSR-Bench integration is additive: `backend=ddsr` selects its generation
+clients beneath the judge interface; existing OpenAI and Bedrock paths remain
+unchanged. Review redundancy separately before removing implementations.
+Keep task input adaptation in `critpt_ai/inputs.py` and client adaptation in
+`llm/clients/client.py`. Add input paths without changing the existing external
+Auto-CritPt interfaces; import optional dependencies only when used. Reuse
+DDSR-Bench's task decoder and prompt definitions, but own the
+conversion to grading inputs here; do not depend on temporary sibling adapters.
 
 For folder reviews, compare the actual sibling `ddsr_bench/grading/` layout and
 review responsibilities and dependencies together, not just individual names.
