@@ -13,7 +13,7 @@ pytest.importorskip("sympy")
 from ddpr.rewards.physics import PhysicsReward, PhysicsRewardError, grade_response
 from ddpr.rewards.physics.inputs import parse_grading_problem
 from ddpr.rewards.physics.llm.semantic import LLMSemanticJudge, SemanticJudgeConfig
-from ddpr.rewards.physics.rules.plan import grade_with_plan
+from ddpr.rewards.physics.rule.plan import grade_with_plan
 
 
 def _tasks():

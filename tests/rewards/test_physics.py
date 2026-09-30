@@ -481,9 +481,9 @@ def test_slime_reward_calls_real_grader_from_worker_thread(monkeypatch):
 
 
 def test_rule_comparisons():
-    from ddpr.rewards.physics.rules.categorical import grade_categorical
-    from ddpr.rewards.physics.rules.numeric import grade_exact, grade_floating_numeric
-    from ddpr.rewards.physics.rules.symbolic import grade_symbolic
+    from ddpr.rewards.physics.rule.categorical import grade_categorical
+    from ddpr.rewards.physics.rule.numeric import grade_exact, grade_floating_numeric
+    from ddpr.rewards.physics.rule.symbolic import grade_symbolic
 
     assert grade_exact("sqrt(4)", "2").passed
     assert grade_symbolic("x+x", "2*x", {"variables": ["x"]}).passed

@@ -53,7 +53,7 @@ the public task, submitted result and expected expression, and must not solve
 the task or fill in a missing answer. Exact numeric cross-checks use 16 digits as
 conflict evidence, not a replacement for symbolic proof.
 
-Rule comparisons live in `rules/`; answer extraction and deadlines live in
+Rule comparisons live in `rule/`; answer extraction and deadlines live in
 `execution/`. Both use the same expression vocabulary. LLM policies live in
 `llm/`, provider calls in `transport/`, and shared models in `schemas.py`.
 `inputs.py` normalizes native problems; `grader.py` coordinates assessments.

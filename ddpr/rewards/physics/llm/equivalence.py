@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 import json
 import os
 from collections.abc import Mapping
@@ -18,48 +17,19 @@ from ..transport.client import complete_judge
 from ..transport.config import (
     Completion,
     JudgeBackendConfig,
-    load_dotenv,
     transport_from_env,
 )
 from .parsing import extract_json_object, normalize_result
 
-DEFAULT_JUDGE_MODEL = "openai.gpt-5.6-sol"
-
 
 class EquivalenceJudgeConfig(JudgeBackendConfig):
-    model_config = ConfigDict(extra="forbid")
-
-    model: str = DEFAULT_JUDGE_MODEL
-    region: str = "us-east-1"
     max_tokens: int = Field(default=16000, ge=1, le=32000)
-    reasoning_effort: str = "high"
-    timeout_seconds: float = Field(default=600.0, gt=0.0)
     minimum_confidence: float = Field(default=0.90, ge=0.0, le=1.0)
 
     @classmethod
     def from_env(cls) -> "EquivalenceJudgeConfig":
-        load_dotenv()
         return cls(
             **transport_from_env("AUTO_CRITPT_GRADER_JUDGE"),
-            model=os.getenv(
-                "AUTO_CRITPT_GRADER_JUDGE_MODEL",
-                DEFAULT_JUDGE_MODEL,
-            ),
-            region=os.getenv(
-                "AUTO_CRITPT_GRADER_JUDGE_REGION",
-                "us-east-1",
-            ),
-            max_tokens=int(os.getenv("AUTO_CRITPT_GRADER_JUDGE_MAX_TOKENS", "16000")),
-            reasoning_effort=os.getenv(
-                "AUTO_CRITPT_GRADER_JUDGE_REASONING_EFFORT",
-                "high",
-            ),
-            timeout_seconds=float(
-                os.getenv(
-                    "AUTO_CRITPT_GRADER_JUDGE_TIMEOUT_SECONDS",
-                    "600",
-                )
-            ),
             minimum_confidence=float(
                 os.getenv(
                     "AUTO_CRITPT_GRADER_JUDGE_MIN_CONFIDENCE",
@@ -78,24 +48,6 @@ class EquivalenceJudge(Protocol):
         deterministic_grade: PrimitiveGrade,
         public_problem: Mapping[str, str] | None = None,
     ) -> EquivalenceJudgment: ...
-
-
-def judge_equivalence(
-    judge: EquivalenceJudge,
-    *,
-    call: GradingCall,
-    actual: Any,
-    deterministic_grade: PrimitiveGrade,
-    public_problem: Mapping[str, str] | None = None,
-) -> EquivalenceJudgment:
-    kwargs = dict(call=call, actual=actual, deterministic_grade=deterministic_grade)
-    # Preserve older injected Judge implementations while extending the built-in one.
-    parameters = inspect.signature(judge.judge).parameters
-    if "public_problem" in parameters or any(
-        item.kind == inspect.Parameter.VAR_KEYWORD for item in parameters.values()
-    ):
-        kwargs["public_problem"] = public_problem
-    return judge.judge(**kwargs)
 
 
 class _EquivalenceResponse(BaseModel):

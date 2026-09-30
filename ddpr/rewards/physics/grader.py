@@ -22,12 +22,12 @@ from .inputs import parse_grading_problem
 from .llm.equivalence import (
     EquivalenceJudge,
     ExpressionEquivalenceJudge,
-    judge_equivalence,
 )
 from .llm.semantic import LLMSemanticJudge
-from .rules.numeric import compare_exact_numerically
-from .rules.plan import compose_grades, grade_with_plan
+from .rule.numeric import compare_exact_numerically
+from .rule.plan import compose_grades, grade_with_plan
 from .schemas import (
+    EquivalenceJudgment,
     ExactNumericComparison,
     FreestyleProblemGradingInput,
     GradeReport,
@@ -226,8 +226,7 @@ def grade_response(
         if selected_judge is None:
             selected_judge = ExpressionEquivalenceJudge()
         try:
-            judgment = judge_equivalence(
-                selected_judge,
+            judgment = selected_judge.judge(
                 call=call,
                 actual=extracted_answer[call.target],
                 deterministic_grade=grade,
@@ -255,7 +254,7 @@ def grade_response(
         if numeric_comparison is not None:
             judgment = _reconcile_numeric_evidence(
                 judgment,
-                numeric_comparison.status,
+                numeric_comparison,
             )
         judgments.append(judgment)
         if judgment.resolution == "equivalent":
@@ -368,7 +367,10 @@ def _grade_freestyle_response(
     )
 
 
-def _reconcile_numeric_evidence(judgment: Any, status: str) -> Any:
+def _reconcile_numeric_evidence(
+    judgment: EquivalenceJudgment, comparison: ExactNumericComparison
+) -> EquivalenceJudgment:
+    status = comparison.status
     conflict = (judgment.resolution == "equivalent" and status == "different") or (
         judgment.resolution == "not_equivalent" and status == "match"
     )

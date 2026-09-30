@@ -6,7 +6,7 @@ import math
 import re
 from typing import Any
 
-from ..rules.expressions import (
+from ..rule.expressions import (
     _ALLOWED_SYMPY_CALLS,
     _FORBIDDEN_AST_NODES,
     _SYMPY_CONSTANT_NAMES,

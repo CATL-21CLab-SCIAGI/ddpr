@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -14,44 +13,18 @@ from ..transport.client import complete_judge
 from ..transport.config import (
     Completion,
     JudgeBackendConfig,
-    load_dotenv,
     transport_from_env,
 )
 from .parsing import extract_json_object, normalize_result
 
 
 class SemanticJudgeConfig(JudgeBackendConfig):
-    model_config = ConfigDict(extra="forbid")
-
-    model: str = "openai.gpt-5.6-sol"
-    region: str = "us-east-1"
     max_tokens: int = Field(default=32000, ge=1, le=64000)
-    reasoning_effort: str = "high"
     timeout_seconds: float = Field(default=1800.0, gt=0.0)
 
     @classmethod
     def from_env(cls) -> "SemanticJudgeConfig":
-        load_dotenv()
-        return cls(
-            **transport_from_env("AUTO_CRITPT_GRADER_SEMANTIC_JUDGE"),
-            model=os.getenv(
-                "AUTO_CRITPT_GRADER_SEMANTIC_JUDGE_MODEL", "openai.gpt-5.6-sol"
-            ),
-            region=os.getenv("AUTO_CRITPT_GRADER_SEMANTIC_JUDGE_REGION", "us-east-1"),
-            max_tokens=int(
-                os.getenv("AUTO_CRITPT_GRADER_SEMANTIC_JUDGE_MAX_TOKENS", "32000")
-            ),
-            reasoning_effort=os.getenv(
-                "AUTO_CRITPT_GRADER_SEMANTIC_JUDGE_REASONING_EFFORT",
-                "high",
-            ),
-            timeout_seconds=float(
-                os.getenv(
-                    "AUTO_CRITPT_GRADER_SEMANTIC_JUDGE_TIMEOUT_SECONDS",
-                    "1800",
-                )
-            ),
-        )
+        return cls(**transport_from_env("AUTO_CRITPT_GRADER_SEMANTIC_JUDGE"))
 
 
 class _JudgeResponse(BaseModel):

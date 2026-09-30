@@ -7,8 +7,7 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
-from ..rules.plan import grade_with_plan
-from ..schemas import GradingPlan, GradingResult
+from ..schemas import GradingPlan
 from .answers import extract_gradeable_answer
 
 DEFAULT_GRADER_TIMEOUT_SECONDS = 120.0
@@ -31,16 +30,6 @@ def grader_timeout_seconds() -> float:
     if seconds <= 0:
         raise ValueError("AUTO_CRITPT_GRADER_TIMEOUT_SECONDS must be positive")
     return seconds
-
-
-def evaluate_answer_locally(
-    response: str,
-    plan: GradingPlan,
-    extract: Callable[..., dict[str, Any]] = extract_gradeable_answer,
-    grade: Callable[..., GradingResult] = grade_with_plan,
-) -> tuple[dict[str, Any], GradingResult]:
-    answer = extract_answer_locally(response, plan, extract)
-    return answer, grade(answer, plan)
 
 
 def extract_answer_locally(

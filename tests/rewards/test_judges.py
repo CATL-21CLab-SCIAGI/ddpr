@@ -1,4 +1,5 @@
 import json
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -21,6 +22,59 @@ from ddpr.rewards.physics.schemas import (
     PrimitiveGrade,
 )
 from ddpr.rewards.physics.transport import bedrock, client
+
+
+@pytest.mark.parametrize(
+    "config_type,prefix,tokens,timeout",
+    [
+        (EquivalenceJudgeConfig, "AUTO_CRITPT_GRADER_JUDGE", 16000, 600),
+        (SemanticJudgeConfig, "AUTO_CRITPT_GRADER_SEMANTIC_JUDGE", 32000, 1800),
+    ],
+)
+def test_judge_environment(monkeypatch, tmp_path, config_type, prefix, tokens, timeout):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        os,
+        "environ",
+        {
+            k: v
+            for k, v in os.environ.items()
+            if not k.startswith("AUTO_CRITPT_GRADER_")
+        },
+    )
+    defaults = config_type.from_env()
+    assert defaults == config_type()
+    assert defaults.max_tokens == tokens
+    assert defaults.timeout_seconds == timeout
+
+    (tmp_path / ".env").write_text(
+        f"{prefix}_MODEL=dotenv-model\n{prefix}_REGION=test-region\n",
+        encoding="utf-8",
+    )
+    overrides = {
+        "MODEL": "environment-model",
+        "BACKEND": " OPENAI ",
+        "MAX_TOKENS": "1234",
+        "TIMEOUT_SECONDS": "45.5",
+        "REASONING_EFFORT": "low",
+        "API_KEY_ENV": "",
+        "EXTRA_BODY_JSON": '{"enable_thinking": true}',
+    }
+    for suffix, value in overrides.items():
+        monkeypatch.setenv(f"{prefix}_{suffix}", value)
+    configured = config_type.from_env()
+    assert configured.model == "environment-model"
+    assert configured.region == "test-region"
+    assert configured.backend == "openai"
+    assert configured.max_tokens == 1234
+    assert configured.timeout_seconds == 45.5
+    assert configured.reasoning_effort == "low"
+    assert configured.api_key_env is None
+    assert configured.extra_body == {"enable_thinking": True}
+
+    monkeypatch.setenv(f"{prefix}_MAX_TOKENS", "0")
+    with pytest.raises(ValueError):
+        config_type.from_env()
 
 
 @pytest.mark.parametrize(

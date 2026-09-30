@@ -30,11 +30,12 @@ class JudgeBackendConfig(BaseModel):
 
 
 def transport_from_env(prefix: str) -> dict[str, Any]:
+    load_dotenv()
     raw = os.getenv(f"{prefix}_EXTRA_BODY_JSON", "").strip()
     extra = json.loads(raw) if raw else {}
     if not isinstance(extra, dict):
         raise ValueError(f"{prefix}_EXTRA_BODY_JSON must decode to a JSON object")
-    return {
+    values = {
         "backend": os.getenv(f"{prefix}_BACKEND", "bedrock").strip().casefold(),
         "base_url": os.getenv(f"{prefix}_BASE_URL", "http://127.0.0.1:8000/v1"),
         "api_key_env": os.getenv(f"{prefix}_API_KEY_ENV", "OPENAI_API_KEY").strip()
@@ -45,6 +46,18 @@ def transport_from_env(prefix: str) -> dict[str, Any]:
         ),
         "extra_body": extra,
     }
+
+    for field in (
+        "model",
+        "region",
+        "max_tokens",
+        "reasoning_effort",
+        "timeout_seconds",
+    ):
+        value = os.getenv(f"{prefix}_{field.upper()}")
+        if value is not None:
+            values[field] = value
+    return values
 
 
 Completion = Callable[

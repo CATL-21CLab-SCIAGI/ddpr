@@ -12,7 +12,7 @@ from ddpr.rewards.physics.execution.runtime import (
     extract_answer_locally,
     run_with_deadline,
 )
-from ddpr.rewards.physics.rules.plan import grade_with_plan
+from ddpr.rewards.physics.rule.plan import grade_with_plan
 from ddpr.rewards.physics.schemas import GradingPlan, UnexecutedAnswer
 
 

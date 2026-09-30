@@ -106,6 +106,11 @@ keep `ddpr/data` independent of training frameworks.
 
 ## Coding conventions
 
+Physics grading keeps rules, LLM assessments, execution and transport separate;
+the DDPR reward maps assessments to training scores. Keep this implementation
+independent of consensus. DDSR-Bench input/output adapters and client integration
+are deferred until integration; do not introduce speculative shared interfaces.
+
 Follow the sibling ddsr-bench project's style and compare related code before
 introducing patterns or renaming APIs.
 
@@ -136,6 +141,14 @@ Slime backend tests use the installed package; full CLI checks remain opt-in.
 See [verification](ddpr/backends/slime/README.md#verification).
 Report local tests, tokenizer checks and GPU training separately. Keep changes
 focused and describe the behavior changed, validation performed and limitations.
+
+For package moves, build a wheel from a clean source tree and verify imports,
+assets and license notices. Check obsolete files, cache-only or empty source
+directories, ignored outputs and the final Git diff before committing. Never
+publish private tasks, references, credentials or run artifacts.
+Use static checks for saved corpus code; do not execute it on the host. Keep
+matched references in regression coverage alongside unresolved and different
+cases, and distinguish rule checks from mocked or live LLM assessments.
 
 ## Local and DSW files
 

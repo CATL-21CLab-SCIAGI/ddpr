@@ -17,16 +17,20 @@ Integration changes:
   `transport/`. Upstream `backends.py`, `judge_backend.py` and `llm_io.py` are now
   `transport/openai.py`, `transport/client.py` and `llm/parsing.py`.
   Transport configuration is in `transport/config.py`.
+  Shared environment loading preserves each judge's defaults and prefix.
   Both LLM policies accept the same injected `(messages, config)` completion
   callable, returning text or `CompletionResult`. Provider result conversion
   belongs to transport; prompts, confidence rules and schema repair are preserved.
 - The equivalence prompt now explicitly requests numeric confidence in `[0, 1]`.
   Live Qwen responses otherwise used `"high"`, which the schema correctly rejects.
   The confidence threshold and validation remain unchanged.
-- `primitives.py` is split across `rules/`, `execution/answers.py` and `schemas.py`.
+- `primitives.py` is split across `rule/`, `execution/answers.py` and `schemas.py`.
   Comparison and extraction definitions are unchanged. The shared expression
-  vocabulary lives in `rules/expressions.py`; answer execution imports it.
+  vocabulary lives in `rule/expressions.py`; answer execution imports it.
   `grading_runtime.py` is now `execution/runtime.py`, with unchanged deadlines.
+  Removed its unused combined extraction/grading function; `grader.py` owns
+  that sequence. Equivalence judges use the declared `judge` protocol directly,
+  without signature inspection for older implementations.
 - `grader.py` combines the former public adapter and `evaluator.py` orchestration,
   avoiding a second normalization pass. `inputs.py` owns native problem parsing;
   the unused internal judge-mode guard and `_core` package are removed.
@@ -44,8 +48,8 @@ Integration changes:
   plan composition code is retained for source parity, not exposed as a reward.
 
 The former floating/exact/symbolic/categorical re-export modules are removed;
-comparison implementations live in `rules/numeric.py`, `rules/symbolic.py` and
-`rules/categorical.py`. SemanticJudge and the optional Auto
+comparison implementations live in `rule/numeric.py`, `rule/symbolic.py` and
+`rule/categorical.py`. SemanticJudge and the optional Auto
 equivalence Judge live in `llm/semantic.py` and `llm/equivalence.py`.
 For raw responses, always use
 `physics.grade_response` or `PhysicsReward` so extraction and deadlines apply.
