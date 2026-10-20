@@ -185,7 +185,7 @@ def score(scorer, problem, response, teacher="UNVERIFIED_TEACHER_SENTINEL"):
 )
 def test_four_auto_types(kind, expected, args, expression, passed):
     problem = auto_problem(kind, expected, args)
-    scorer = CritptAiReward(judge_enabled=False)
+    scorer = CritptAiReward(llm_fallback=False)
     assert score(scorer, problem, block(expression)) == float(passed)
 
 
@@ -211,7 +211,7 @@ def test_variable_assumptions_and_categorical_aliases():
     )
     assert (
         grade_response(
-            problem, block("sp.sqrt(x*x)"), judge_enabled=False
+            problem, block("sp.sqrt(x*x)"), llm_fallback=False
         ).grading_status
         == "pass"
     )
@@ -221,7 +221,7 @@ def test_variable_assumptions_and_categorical_aliases():
         {"choices": ["A", "B"], "allowed_aliases": {"alpha": "A"}},
     )
     assert (
-        grade_response(problem, block("{'alpha'}"), judge_enabled=False).grading_status
+        grade_response(problem, block("{'alpha'}"), llm_fallback=False).grading_status
         == "pass"
     )
 
@@ -260,7 +260,7 @@ def test_missing_sympy_is_not_a_zero_reward(monkeypatch, failed_import):
     monkeypatch.setattr(builtins, "__import__", import_module)
     with pytest.raises(CritptAiRewardError) as raised:
         score(
-            CritptAiReward(judge_enabled=False), auto_problem("exact", "2"), block("2")
+            CritptAiReward(llm_fallback=False), auto_problem("exact", "2"), block("2")
         )
     assert imports == failed_import
     assert raised.value.report.grading_status == "grader_error"
@@ -283,7 +283,7 @@ def test_comparison_errors_are_not_zero_rewards(monkeypatch, kind, expression, e
     )
     response = block(expression)
     with pytest.raises(CritptAiRewardError) as raised:
-        score(CritptAiReward(judge_enabled=False), problem, response)
+        score(CritptAiReward(llm_fallback=False), problem, response)
     assert raised.value.report.grading_status == "grader_error"
     assert raised.value.report.extraction_status == "success"
     assert raised.value.report.extracted_answer is not None
@@ -335,9 +335,7 @@ def test_unresolved_is_exception_not_zero(monkeypatch, failure):
             config=EquivalenceJudgeConfig(model="test"),
             completion=unavailable,
         )
-    scorer = CritptAiReward(
-        judge_enabled=failure != "disabled", equivalence_judge=judge
-    )
+    scorer = CritptAiReward(llm_fallback=failure != "disabled", equivalence_judge=judge)
     problem = auto_problem("symbolic", "x", {"variables": ["x"]})
     with pytest.raises(CritptAiRewardError) as raised:
         score(scorer, problem, block("sp.fresnels(x)"))
@@ -364,7 +362,7 @@ def test_exact_numeric_conflict_is_unresolved():
 def test_freestyle_multiple_items_and_teacher_ignored(verdict, expected):
     prompts = []
     scorer = CritptAiReward(
-        judge_enabled=False, semantic_judge=semantic(verdict, prompts)
+        llm_fallback=False, semantic_judge=semantic(verdict, prompts)
     )
     assert score(scorer, freestyle_problem(), "E=2; stable.") == expected
     payload = json.loads(prompts[0][1]["content"])
@@ -391,7 +389,7 @@ def test_report_round_trip_preserves_judgment(verdict):
 
 
 def test_reference_completion_cannot_override_ground_truth():
-    scorer = CritptAiReward(judge_enabled=False)
+    scorer = CritptAiReward(llm_fallback=False)
     problem = auto_problem(expected="1")
     assert score(scorer, problem, block("1"), teacher=block("2")) == 1
     assert score(scorer, problem, block("2"), teacher=block("2")) == 0
@@ -467,7 +465,7 @@ sys.path.insert(0, sys.argv[1])
 from ddsr_bench.benchmarks.critpt.evaluation.ai.grader import grade_response
 from ddsr_bench.benchmarks.critpt.evaluation.ai.io.inputs import parse_grading_problem
 problem = parse_grading_problem(json.loads(sys.argv[2]))
-report = grade_response(problem, "", judge_enabled=False)
+report = grade_response(problem, "", llm_fallback=False)
 assert report.extraction_status == "missing_answer_function"
 assert "reward" not in report.model_dump()
 assert not any(name == "ddpr" or name.startswith("ddpr.") for name in sys.modules)
@@ -483,7 +481,7 @@ assert not any(name == "ddpr" or name.startswith("ddpr.") for name in sys.module
 def test_zero_argument_reward_loads_with_environment(monkeypatch):
     monkeypatch.setenv("DDPR_CRITPT_AI_EQUIVALENCE_JUDGE", "false")
     load_reward.cache_clear()
-    assert not load_reward("ddpr.rewards.critpt_ai.CritptAiReward").judge_enabled
+    assert not load_reward("ddpr.rewards.critpt_ai.CritptAiReward").llm_fallback
     monkeypatch.setenv("DDPR_CRITPT_AI_EQUIVALENCE_JUDGE", "invalid")
     with pytest.raises(ValueError, match="must be true or false"):
         CritptAiReward()
@@ -509,7 +507,7 @@ def test_slime_reward_calls_real_grader_from_worker_thread(monkeypatch):
     from ddpr.backends.slime import reward
 
     monkeypatch.setattr(
-        reward, "load_reward", lambda _path: CritptAiReward(judge_enabled=False)
+        reward, "load_reward", lambda _path: CritptAiReward(llm_fallback=False)
     )
     problem = auto_problem(expected="1")
     samples = [
@@ -558,7 +556,7 @@ def test_swift_adapter_with_mocked_framework(monkeypatch):
     spec.loader.exec_module(module)
     monkeypatch.setenv("DDPR_REWARD", "ddpr.rewards.critpt_ai.CritptAiReward")
     monkeypatch.setattr(
-        module, "load_reward", lambda _path: CritptAiReward(judge_enabled=False)
+        module, "load_reward", lambda _path: CritptAiReward(llm_fallback=False)
     )
     adapter = module.RewardAdapter()
     assert adapter(
@@ -583,7 +581,7 @@ def test_invalid_references_are_not_zero_rewards(kind, expected, args):
     problem = auto_problem(kind, expected, args)
     response = block("1.0" if kind == "floating_numeric" else "2")
     with pytest.raises(CritptAiRewardError) as raised:
-        score(CritptAiReward(judge_enabled=False), problem, response)
+        score(CritptAiReward(llm_fallback=False), problem, response)
     assert raised.value.report.grading_status == "grader_error"
 
 
@@ -614,8 +612,8 @@ def test_judge_configuration_failure_is_reported(monkeypatch):
     assert "backend" in report.error_message
 
 
-@pytest.mark.parametrize("judge_enabled", [False, True])
-def test_comparison_timeout_preserves_fallback(monkeypatch, judge_enabled):
+@pytest.mark.parametrize("llm_fallback", [False, True])
+def test_comparison_timeout_preserves_fallback(monkeypatch, llm_fallback):
     def timeout(*args):
         raise GraderTimeout
 
@@ -623,12 +621,12 @@ def test_comparison_timeout_preserves_fallback(monkeypatch, judge_enabled):
     report = grade_response(
         auto_problem("symbolic", "x+1", {"variables": ["x"]}),
         block("x+1"),
-        judge_enabled=judge_enabled,
+        llm_fallback=llm_fallback,
         equivalence_judge=equivalence("equivalent"),
     )
     assert report.extraction_status == "success"
-    assert report.grading_status == ("pass" if judge_enabled else "grader_error")
-    if judge_enabled:
+    assert report.grading_status == ("pass" if llm_fallback else "grader_error")
+    if llm_fallback:
         assert report.deterministic_skip_reasons == {"answer": "comparison_timeout"}
 
 
@@ -705,8 +703,16 @@ def test_invalid_reference_cannot_be_an_incorrect_answer(
 ):
     with pytest.raises(CritptAiRewardError) as raised:
         score(
-            CritptAiReward(judge_enabled=False),
+            CritptAiReward(llm_fallback=False),
             auto_problem(kind, target, kwargs),
             block(response),
         )
     assert raised.value.report.grading_status == "grader_error"
+
+
+def test_reward_fallback_keyword_migration(monkeypatch):
+    monkeypatch.delenv("DDPR_CRITPT_AI_EQUIVALENCE_JUDGE", raising=False)
+    assert CritptAiReward().llm_fallback is True
+    assert CritptAiReward(llm_fallback=False).llm_fallback is False
+    with pytest.raises(TypeError, match="judge_enabled"):
+        CritptAiReward(judge_enabled=False)

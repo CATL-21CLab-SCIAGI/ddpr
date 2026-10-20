@@ -81,10 +81,10 @@ def test_compiled_problem(task):
     assert load_reward_problem(metadata) == problem
     if problem.spec.grader == "rule":
         # Check real contracts without executing downloaded answer code.
-        report = grade_response(problem, "", judge_enabled=False)
+        report = grade_response(problem, "", llm_fallback=False)
         assert report.extraction_status == "missing_answer_function"
         assert (
-            CritptAiReward(judge_enabled=False)(
+            CritptAiReward(llm_fallback=False)(
                 response="",
                 sample_id=task.name,
                 reference_completion="UNVERIFIED_TEACHER",

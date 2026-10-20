@@ -72,7 +72,7 @@ def load_problem(metadata: Mapping[str, Any]) -> AIProblem | GradingInput:
     return parse_grading_problem(payload)
 
 
-def _judge_enabled() -> bool:
+def _llm_fallback() -> bool:
     value = os.getenv("DDPR_CRITPT_AI_EQUIVALENCE_JUDGE", "true").strip().casefold()
     if value not in {"true", "false", "1", "0"}:
         raise ValueError("DDPR_CRITPT_AI_EQUIVALENCE_JUDGE must be true or false")
@@ -83,7 +83,7 @@ def _judge_enabled() -> bool:
 class CritptAiReward(Reward):
     """Binary correctness reward; verifier errors are never converted to zero."""
 
-    judge_enabled: bool = field(default_factory=_judge_enabled)
+    llm_fallback: bool = field(default_factory=_llm_fallback)
     equivalence_judge: EquivalenceJudge | None = None
     semantic_judge: LLMSemanticJudge | None = None
 
@@ -99,7 +99,7 @@ class CritptAiReward(Reward):
         report = grade_response(
             load_problem(metadata),
             response,
-            judge_enabled=self.judge_enabled,
+            llm_fallback=self.llm_fallback,
             equivalence_judge=self.equivalence_judge,
             semantic_judge=self.semantic_judge,
             attempt_id=sample_id or "student-response",

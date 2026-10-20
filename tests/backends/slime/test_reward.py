@@ -109,7 +109,7 @@ def test_live_ray_reward_environment(monkeypatch):
         def inspect_reward():
             from ddpr.rewards.critpt_ai import CritptAiReward
 
-            return CritptAiReward().judge_enabled, os.environ["TEST_JUDGE_KEY"]
+            return CritptAiReward().llm_fallback, os.environ["TEST_JUDGE_KEY"]
 
         # Slime actors supply their own environment, which must retain job values.
         assert ray.get(

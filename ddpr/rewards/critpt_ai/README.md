@@ -18,7 +18,10 @@ The grader guide at
 `ddsr_bench/benchmarks/critpt/evaluation/ai/README.md` in the DDSR-Bench
 checkout owns judge configuration and execution limits.
 Set `DDPR_CRITPT_AI_EQUIVALENCE_JUDGE=false` to disable rule-grading LLM fallback;
-Freestyle still needs its semantic judge. Existing OpenAI and Bedrock clients
+Freestyle still needs its semantic judge. Python callers must replace
+`CritptAiReward(judge_enabled=...)` with `CritptAiReward(llm_fallback=...)`;
+the old keyword is no longer accepted. The default remains `True`, and the
+existing environment variable is unchanged. Existing OpenAI and Bedrock clients
 and the additive DDSR client configuration are preserved.
 
 Export judge settings and credentials before launching either backend. Slime
