@@ -67,6 +67,20 @@ Both tasks skip empty completion text and report filtering counts. Samples must
 fit the tests' 8192-token limit; no content is truncated. This is a tiny-model
 integration check, not Qwen3.8-27B GPU training.
 
+For CritPt-AI integration checks with private compiled tasks:
+
+```bash
+DDPR_TEST_CRITPT_TASKS=../ddsr-bench/tasks/critpt-ai \
+python -m pytest -q tests/rewards tests/test_rewards.py
+```
+
+Set `DDPR_TEST_CRITPT_AI_REPLAY` to a saved-response directory to replay private
+judge completions through mocked HTTP, without network calls or corpus execution.
+Set `DDPR_TEST_RAY=1` for the local worker configuration check in
+`tests/backends/slime/test_reward.py`; it uses test credentials and no model calls.
+Core grader tests live in DDSR-Bench. These checks do not establish live provider
+quality, isolated rule execution, or GPU training.
+
 ## Code layout
 
 - `ddpr/data/`: framework-independent schemas and export normalization.

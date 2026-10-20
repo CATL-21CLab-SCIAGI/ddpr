@@ -28,6 +28,8 @@ from ddsr_bench.benchmarks.critpt.evaluation.ai.llm.semantic import (
 
 from ddpr.rewards.base import Reward
 
+__all__ = ["CritptAiReward", "CritptAiRewardError", "grade_response", "load_problem"]
+
 
 class CritptAiRewardError(RuntimeError):
     """No reliable reward is available; the report distinguishes why."""
