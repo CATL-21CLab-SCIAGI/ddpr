@@ -6,8 +6,8 @@ answer processing and report schemas live in DDSR-Bench.
 
 ## Setup
 
-Use the DDSR-Bench checkout containing `benchmarks.critpt.evaluation.ai`;
-this incorporation is not yet released:
+Install the DDSR-Bench checkout containing the merged CritPt-AI integration
+(PR #10) in the same environment as DDPR:
 
 ```bash
 python -m pip install -e ../ddsr-bench -e '.[critpt-ai]'
@@ -20,6 +20,17 @@ checkout owns judge configuration and execution limits.
 Set `DDPR_CRITPT_AI_EQUIVALENCE_JUDGE=false` to disable rule-grading LLM fallback;
 Freestyle still needs its semantic judge. Existing OpenAI and Bedrock clients
 and the additive DDSR client configuration are preserved.
+
+Export judge settings and credentials before launching either backend. Slime
+forwards `AUTO_CRITPT_*`, `DDPR_CRITPT_AI_*`, the standard OpenAI/Aliyun/Bedrock
+keys and keys named by judge `*_API_KEY_ENV` settings through Ray's job
+environment. Swift workers inherit the exported environment.
+Do not rely on a driver-only `.env` file. Protect Ray's dashboard and job data,
+which can contain worker credentials.
+
+Use the existing RL smoke launcher for either backend with `DDPR_REWARD` set
+as above and an export containing canonical task metadata. This overrides the
+synthetic smoke reward. Judge API calls may be incurred if enabled.
 
 ## Input and scores
 
@@ -50,7 +61,6 @@ and the metadata-based `load_problem`; judge classes come from DDSR-Bench.
 ## Verification
 
 ```bash
-PYTHONPATH=../ddsr-bench \
 DDPR_TEST_CRITPT_TASKS=../ddsr-bench/tasks/critpt-ai \
 python -m pytest -q tests/rewards tests/test_rewards.py
 ```
@@ -59,5 +69,9 @@ Set `DDPR_TEST_CRITPT_AI_REPLAY=data/physics-check/saved-response-20260930`
 to replay existing private judge completions through mocked HTTP. Replay checks
 exact prompts and input hashes, semantic scores, static rule assessments and
 unresolved provider failures. It blocks network calls and corpus execution.
-Core grader tests now live in DDSR-Bench. These checks do not establish live
+Set `DDPR_TEST_RAY=1` to run the local Ray worker configuration check in
+`tests/backends/slime/test_reward.py`. It uses test credentials and no model calls.
+Core grader tests live in DDSR-Bench. These checks do not establish live
 provider quality, isolated rule execution, or GPU training with this reward.
+The Python grader executes rule answers locally; Docker is not required by
+this reward adapter.

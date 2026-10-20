@@ -254,3 +254,24 @@ def test_invalid_setup_does_not_install(monkeypatch, capsys, arguments, system, 
         setup.main()
     assert result.value.code == 2
     assert error in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("profile", ["cpu", "slime", "swift"])
+def test_ddsr_setup_preserves_gpu_dependencies(monkeypatch, tmp_path, profile):
+    executor = tmp_path / "ddsr_bench/benchmarks/critpt/evaluation/ai/grader.py"
+    executor.parent.mkdir(parents=True)
+    executor.touch()
+    commands = []
+    monkeypatch.setattr(
+        setup.sys, "argv", ["setup.py", profile, "--ddsr-bench", str(tmp_path)]
+    )
+    monkeypatch.setattr(setup.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(setup, "_setup_cpu", lambda resolve: None)
+    monkeypatch.setattr(
+        setup.subprocess, "run", lambda command, **kw: commands.append(command)
+    )
+    setup.main()
+    install = commands[-2]
+    assert install[-2:] == ["-e", str(tmp_path)]
+    assert ("--no-deps" in install) == (profile != "cpu")
+    assert commands[-1][-2:] == [profile, "--critpt-ai"]

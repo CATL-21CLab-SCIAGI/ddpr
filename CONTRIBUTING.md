@@ -29,6 +29,11 @@ pins the local-debug framework sources. For GPU training, see
 [DSW/DLC environments](envs/README.md).
 Inside a ready Slime or Swift GPU container, use `python scripts/envs/setup.py slime`
 or `python scripts/envs/setup.py swift`; these preserve the container's dependencies.
+For CritPt-AI rewards, add `--ddsr-bench /path/to/ddsr-bench` to setup and
+`--critpt-ai` to the checker. CPU setup installs its dependencies; GPU setup
+installs the checkout without replacing container dependencies and reports any
+missing requirements. Provision those requirements in the container image.
+
 See the [Slime guide](ddpr/backends/slime/README.md) and
 [Swift guide](ddpr/backends/swift/README.md) for backend requirements.
 Prefer ModelScope for model artifacts; tokenizer checks do not require weights.

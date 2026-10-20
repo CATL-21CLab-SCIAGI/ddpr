@@ -106,7 +106,7 @@ to use native hooks in regular RL or the default synthetic reward in smoke jobs.
 Install the optional grading dependencies and select the shared implementation:
 
 ```bash
-python -m pip install -e '.[critpt-ai]'
+python -m pip install -e ../ddsr-bench -e '.[critpt-ai]'
 export DDPR_REWARD=ddpr.rewards.critpt_ai.CritptAiReward
 ```
 
