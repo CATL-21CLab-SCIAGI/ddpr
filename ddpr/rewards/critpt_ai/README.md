@@ -32,6 +32,8 @@ metadata = {"task_path": "/mnt/nas/tasks/critpt-ai/example"}
 ```
 
 Paths must be absolute and readable at the same location on every worker.
+`task_path` uses DDSR-Bench's unified CritPt loader; `problem` and `problem_path`
+retain compatibility with native Auto/Freestyle records.
 Keep files immutable during a run. References and grading plans must never enter
 student prompts. The teacher `reference_completion` argument is ignored.
 `sample_id` identifies the attempt and need not equal the canonical problem ID.

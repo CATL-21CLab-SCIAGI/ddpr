@@ -9,10 +9,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ddsr_bench.benchmarks.critpt.data.loader import load_ai_task
+from ddsr_bench.benchmarks.critpt.data.schemas import AIProblem
 from ddsr_bench.benchmarks.critpt.evaluation.ai.grader import grade_response
-from ddsr_bench.benchmarks.critpt.evaluation.ai.io.inputs import (
-    load_problem as load_task_problem,
-)
 from ddsr_bench.benchmarks.critpt.evaluation.ai.io.inputs import (
     parse_grading_problem,
 )
@@ -45,8 +44,8 @@ class CritptAiRewardError(RuntimeError):
         return type(self), (self.report, self.sample_id)
 
 
-def load_problem(metadata: Mapping[str, Any]) -> GradingInput:
-    """Load exactly one canonical problem from private training metadata."""
+def load_problem(metadata: Mapping[str, Any]) -> AIProblem | GradingInput:
+    """Load a prepared task, or a native Auto/Freestyle compatibility record."""
     if not isinstance(metadata, Mapping):
         raise TypeError("metadata must be a mapping")
     keys = [key for key in ("problem", "problem_path", "task_path") if key in metadata]
@@ -65,7 +64,7 @@ def load_problem(metadata: Mapping[str, Any]) -> GradingInput:
         if not source.is_absolute():
             raise ValueError(f"metadata.{key} must be absolute on every worker")
         if key == "task_path":
-            return load_task_problem(source)
+            return load_ai_task(source)
         with source.open(encoding="utf-8") as stream:
             payload = json.load(stream)
     if not isinstance(payload, Mapping):

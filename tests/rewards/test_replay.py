@@ -13,10 +13,9 @@ pytest.importorskip("pydantic")
 pytest.importorskip("sympy")
 
 import httpx
+from ddsr_bench.benchmarks.critpt.data.loader import load_ai_task
 from ddsr_bench.benchmarks.critpt.evaluation.ai import answer
-from ddsr_bench.benchmarks.critpt.evaluation.ai.io.inputs import (
-    load_problem,
-)
+from ddsr_bench.benchmarks.critpt.evaluation.ai.grader import parse_problem
 from ddsr_bench.benchmarks.critpt.evaluation.ai.llm.equivalence import (
     EquivalenceJudgeConfig,
     LLMEquivalenceJudge,
@@ -103,7 +102,7 @@ def test_rule_reference_replay(replay, monkeypatch):
         )
         reference = json.loads(reference_path.read_text())
         assert reference["reference_check"] == saved["reference_check"]
-        problem = load_problem(task)
+        problem = load_ai_task(task)
         fn = next(
             n
             for n in ast.parse(reference["code"]).body
@@ -119,10 +118,10 @@ def test_rule_reference_replay(replay, monkeypatch):
                 answer_code=reference["code"],
                 reason="Static audit: Python answer function was not executed",
             )
-        result = grade_with_plan({"answer": value}, problem.grading_plan)
+        result = grade_with_plan({"answer": value}, parse_problem(problem).grading_plan)
         if saved["method"] == "rules":
             assert result.passed
-            assert not grade_with_plan({}, problem.grading_plan).passed
+            assert not grade_with_plan({}, parse_problem(problem).grading_plan).passed
             continue
         completion = json.loads(path.with_suffix(".completion.json").read_text())
         consumed = _transport(
@@ -136,10 +135,10 @@ def test_rule_reference_replay(replay, monkeypatch):
                 api_key_env=None,
             )
         ).judge(
-            call=problem.grading_plan.calls[0],
+            call=parse_problem(problem).grading_plan.calls[0],
             answer=value,
             deterministic_grade=result.calls[0],
-            public_problem=problem.model_dump(),
+            public_problem=parse_problem(problem).model_dump(),
         )
         assert judgment.resolution == saved["resolution"] == "equivalent"
         assert len(consumed) == 1
@@ -151,7 +150,7 @@ def test_semantic_reward_replay(replay, monkeypatch, case):
     summary = json.loads((root / "semantic-summary.json").read_text())
     expected = next(row for row in summary["results"] if row["case"] == case)
     task = tasks / "llm" / summary["task"]
-    problem = load_problem(task)
+    problem = load_ai_task(task)
     response_path = root / f"{case}.response.txt"
     assert (
         hashlib.sha256(response_path.read_bytes()).hexdigest()
@@ -177,7 +176,7 @@ def test_semantic_reward_replay(replay, monkeypatch, case):
     )
     assert report.grading_status == expected["status"]
     assert report.semantic_judgment.attempt_id == case
-    assert report.problem_id == problem.problem_id
+    assert report.problem_id == problem.answer.problem_id
     assert report.response_sha256 == expected["response_sha256"]
     assert score == expected["reward"]
     assert len(consumed) == len(saved) * 2

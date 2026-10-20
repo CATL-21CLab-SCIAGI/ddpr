@@ -110,6 +110,8 @@ CritPt-AI grading is owned by DDSR-Bench under
 `ddsr_bench/benchmarks/critpt/evaluation/ai/`, independently of consensus
 and shared grading utilities. DDPR's `CritptAiReward` only loads private training
 metadata and maps reports to scores. Preserve external Auto/Freestyle contracts.
+Load prepared tasks through DDSR-Bench's unified CritPt `data` loader; the grader's
+`io` compatibility parser is only for native Auto/Freestyle records.
 Keep provider reuse additive; review redundancy separately before removing clients.
 Grader changes and core tests belong in DDSR-Bench; reward/backend integration
 and replay tests belong here. Install both checkouts when developing this boundary.

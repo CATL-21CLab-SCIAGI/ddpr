@@ -3,7 +3,6 @@ import builtins
 import importlib.util
 import json
 import pickle
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -458,22 +457,15 @@ def test_nontext_response_is_rejected_before_execution(monkeypatch, response):
         grade_response(auto_problem(), response)
 
 
-def test_grading_can_be_relocated_without_ddpr(tmp_path):
-    source = Path(grader.__file__).parent
-    target = tmp_path / "standalone_critpt_ai"
-    shutil.copytree(
-        source,
-        target,
-        ignore=shutil.ignore_patterns("reward.py", "__pycache__", ".DS_Store"),
-    )
-    # Integration supplies its own exports, excluding DDPR's reward adapter.
-    (target / "__init__.py").write_text("", encoding="utf-8")
+def test_grading_without_ddpr():
+    # The grader belongs to DDSR-Bench and may reuse its data layer, not DDPR.
+    source = Path(grader.__file__).parents[5]
     script = """
 import json
 import sys
 sys.path.insert(0, sys.argv[1])
-from standalone_critpt_ai.grader import grade_response
-from standalone_critpt_ai.io.inputs import parse_grading_problem
+from ddsr_bench.benchmarks.critpt.evaluation.ai.grader import grade_response
+from ddsr_bench.benchmarks.critpt.evaluation.ai.io.inputs import parse_grading_problem
 problem = parse_grading_problem(json.loads(sys.argv[2]))
 report = grade_response(problem, "", judge_enabled=False)
 assert report.extraction_status == "missing_answer_function"
@@ -481,7 +473,7 @@ assert "reward" not in report.model_dump()
 assert not any(name == "ddpr" or name.startswith("ddpr.") for name in sys.modules)
 """
     subprocess.run(
-        [sys.executable, "-I", "-c", script, str(tmp_path), json.dumps(auto_problem())],
+        [sys.executable, "-I", "-c", script, str(source), json.dumps(auto_problem())],
         check=True,
         capture_output=True,
         text=True,
