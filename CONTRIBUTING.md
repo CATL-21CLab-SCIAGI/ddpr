@@ -85,6 +85,9 @@ quality, isolated rule execution, or GPU training.
 
 - `ddpr/data/`: framework-independent schemas and export normalization.
 - `ddpr/rewards/`: shared reward contract, loader and reward implementations.
+  Keep implementation-specific guides alongside modules, such as
+  `critpt_ai.md`; the root README links to them and owns only the shared
+  reward contract.
 - `ddpr/backends/`: adapters for each training backend.
 - `envs/`: environment definitions, dependency pins and setup guidance.
 - `scripts/envs/`: environment installation and validation commands.
