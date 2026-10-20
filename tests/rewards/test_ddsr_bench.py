@@ -9,11 +9,15 @@ pytest.importorskip("ddsr_bench.generation.client")
 pytest.importorskip("pydantic")
 
 import httpx
+from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.llm.clients.client import (
+    DdsrBackend,
+)
+from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.llm.clients.config import (
+    ClientConfig,
+)
 from ddsr_bench.generation.client import CLIENTS, ClientError, VLLMClient
 
 from ddpr.rewards.critpt_ai import load_problem
-from ddpr.rewards.critpt_ai.llm.clients.client import DdsrBackend
-from ddpr.rewards.critpt_ai.llm.clients.config import ClientConfig
 
 
 @pytest.mark.parametrize("inside_loop", [False, True])
@@ -110,7 +114,7 @@ def test_task_metadata(metadata, error):
 
 
 def test_semantic_response_parsing(monkeypatch):
-    from ddpr.rewards.critpt_ai.llm.semantic import (
+    from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.llm.semantic import (
         LLMSemanticJudge,
         SemanticJudgeConfig,
     )
@@ -168,7 +172,9 @@ def test_semantic_response_parsing(monkeypatch):
 @pytest.mark.parametrize("backend", ["vllm", "openai", "aliyun"])
 @pytest.mark.parametrize("status", [200, 401, 503])
 def test_default_dispatch(monkeypatch, backend, status):
-    from ddpr.rewards.critpt_ai.llm.clients.client import complete_judge
+    from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.llm.clients.client import (
+        complete_judge,
+    )
 
     provider = CLIENTS[backend]
     requests, clients = [], []

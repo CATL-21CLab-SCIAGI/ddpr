@@ -13,23 +13,29 @@ import pytest
 
 pytest.importorskip("pydantic")
 pytest.importorskip("sympy")
+pytest.importorskip("ddsr_bench.benchmarks.critpt.evaluation.critpt_ai")
+
+from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai import answer, grader
+from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.critpt_ai.schemas import (
+    GradeReport,
+)
+from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.llm.equivalence import (
+    EquivalenceJudgeConfig,
+    LLMEquivalenceJudge,
+)
+from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.llm.semantic import (
+    LLMSemanticJudge,
+    SemanticJudgeConfig,
+)
+from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.runtime import GraderTimeout
 
 from ddpr.rewards import load_reward
 from ddpr.rewards.critpt_ai import (
     CritptAiReward,
     CritptAiRewardError,
-    answer,
     grade_response,
-    grader,
     load_problem,
 )
-from ddpr.rewards.critpt_ai.critpt_ai.schemas import GradeReport
-from ddpr.rewards.critpt_ai.llm.equivalence import (
-    EquivalenceJudgeConfig,
-    LLMEquivalenceJudge,
-)
-from ddpr.rewards.critpt_ai.llm.semantic import LLMSemanticJudge, SemanticJudgeConfig
-from ddpr.rewards.critpt_ai.runtime import GraderTimeout
 
 
 @pytest.mark.parametrize(
@@ -530,12 +536,16 @@ def test_slime_reward_calls_real_grader_from_worker_thread(monkeypatch):
 
 
 def test_rule_comparisons():
-    from ddpr.rewards.critpt_ai.rule.categorical import grade_categorical
-    from ddpr.rewards.critpt_ai.rule.numeric import (
+    from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.rule.categorical import (
+        grade_categorical,
+    )
+    from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.rule.numeric import (
         grade_exact_numeric,
         grade_floating_numeric,
     )
-    from ddpr.rewards.critpt_ai.rule.symbolic import grade_symbolic
+    from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.rule.symbolic import (
+        grade_symbolic,
+    )
 
     assert grade_exact_numeric(answer="sqrt(4)", target="2").passed
     assert grade_symbolic(answer="x+x", target="2*x", variables=["x"]).passed
@@ -652,9 +662,10 @@ def test_legacy_freestyle_accepts_mapping_input():
 def test_native_report_formatting(freestyle):
     import hashlib
 
+    from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.critpt_ai.outputs import (
+        format_report,
+    )
     from sympy import Rational
-
-    from ddpr.rewards.critpt_ai.critpt_ai.outputs import format_report
 
     problem = load_problem(
         {"problem": freestyle_problem() if freestyle else auto_problem()}

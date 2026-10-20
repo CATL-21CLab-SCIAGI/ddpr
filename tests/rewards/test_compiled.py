@@ -9,11 +9,20 @@ import pytest
 
 pytest.importorskip("pydantic")
 pytest.importorskip("sympy")
+pytest.importorskip("ddsr_bench.benchmarks.critpt.evaluation.critpt_ai")
+
+from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.critpt_ai.inputs import (
+    load_problem,
+)
+from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.llm.semantic import (
+    LLMSemanticJudge,
+    SemanticJudgeConfig,
+)
+from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.rule.compare import (
+    grade_with_plan,
+)
 
 from ddpr.rewards.critpt_ai import CritptAiReward, CritptAiRewardError, grade_response
-from ddpr.rewards.critpt_ai.critpt_ai.inputs import load_problem
-from ddpr.rewards.critpt_ai.llm.semantic import LLMSemanticJudge, SemanticJudgeConfig
-from ddpr.rewards.critpt_ai.rule.compare import grade_with_plan
 
 
 def _tasks():

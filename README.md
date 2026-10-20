@@ -127,8 +127,8 @@ optional exact/symbolic equivalence judging. Freestyle uses SemanticJudge and
 supports multiple answer items. Auto composite is not connected yet.
 
 See [CritPt-AI reward usage and configuration](ddpr/rewards/critpt_ai/README.md).
-The grading code is bundled; the generation repositories and standalone grader
-package are not runtime dependencies. GPU training with this reward has not been
+Grading is supplied by the DDSR-Bench checkout containing the CritPt-AI evaluator;
+the standalone Auto-CritPt project is not a runtime dependency. GPU training with this reward has not been
 validated. Existing backend adapters score serially within each reward process;
 LLM judging may be substantially slower and more expensive than a numeric check.
 

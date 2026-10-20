@@ -106,27 +106,13 @@ keep `ddpr/data` independent of training frameworks.
 
 ## Coding conventions
 
-CritPt-AI grading keeps rules, LLM assessments, execution and model clients separate;
-the DDPR reward maps assessments to training scores. `llm/clients/` owns provider
-calls and configuration; `llm/` owns assessment prompts and policy. Keep this
-implementation independent of consensus. `critpt_ai/` owns native Auto/Freestyle problem formats,
-parsing and report formatting; it is an I/O adapter, not the grading engine.
-Root `grader.py` owns orchestration. Root `schemas.py` holds shared grading plans,
-precision, assessment and completion types. `answer.py`, `validation.py` and
-`runtime.py` own shared answer processing, checks and deadlines. Classify code
-by its responsibility and consumers: these grading plans and the `answer()`
-convention belong to this CritPt-AI grader, while the nested I/O adapter owns
-the external Auto/Freestyle representation. Judges consume shared types
-or explicit public/reference data, not native problem models. The public
-`grade_response` entry point and reward loader retain the native I/O boundary.
-DDSR-Bench integration is additive: `backend=ddsr` selects its generation
-clients beneath the judge interface; existing OpenAI and Bedrock paths remain
-unchanged. Review redundancy separately before removing implementations.
-Keep task input adaptation in `critpt_ai/inputs.py` and client adaptation in
-`llm/clients/client.py`. Add input paths without changing the existing external
-Auto-CritPt interfaces; import optional dependencies only when used. Reuse
-DDSR-Bench's task decoder and prompt definitions, but own the
-conversion to grading inputs here; do not depend on temporary sibling adapters.
+CritPt-AI grading is owned by DDSR-Bench under
+`ddsr_bench/benchmarks/critpt/evaluation/critpt_ai/`, independently of consensus
+and shared grading utilities. DDPR's `CritptAiReward` only loads private training
+metadata and maps reports to scores. Preserve external Auto/Freestyle contracts.
+Keep provider reuse additive; review redundancy separately before removing clients.
+Grader changes and core tests belong in DDSR-Bench; reward/backend integration
+and replay tests belong here. Install both checkouts when developing this boundary.
 
 For folder reviews, compare the actual sibling `ddsr_bench/grading/` layout and
 review responsibilities and dependencies together, not just individual names.

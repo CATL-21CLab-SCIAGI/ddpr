@@ -12,14 +12,11 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.8"]
-critpt-ai = ["pydantic>=2.10", "sympy>=1.13"]
+critpt-ai = ["ddsr-bench>=0.1.0"]
 ddsr = ["ddsr-bench>=0.1.0"]
 
 [tool.setuptools.packages.find]
 include = ["ddpr*"]
-
-[tool.setuptools.package-data]
-"ddpr.rewards.critpt_ai" = ["LICENSE", "UPSTREAM.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -28,18 +25,3 @@ addopts = ["--import-mode=importlib"]
 [tool.ruff]
 line-length = 88
 target-version = "py312"
-
-[tool.ruff.lint.per-file-ignores]
-# Preserve upstream exception classification and answer-code restrictions.
-"ddpr/rewards/critpt_ai/grader.py" = ["BLE001"]
-"ddpr/rewards/critpt_ai/llm/clients/bedrock.py" = ["SIM117", "TRY004"]
-"ddpr/rewards/critpt_ai/llm/equivalence.py" = ["C408", "UP037"]
-"ddpr/rewards/critpt_ai/llm/clients/openai.py" = ["UP037", "UP041"]
-"ddpr/rewards/critpt_ai/llm/utils.py" = ["TRY201"]
-"ddpr/rewards/critpt_ai/llm/semantic.py" = ["BLE001", "UP037"]
-"ddpr/rewards/critpt_ai/llm/clients/config.py" = ["TRY004"]
-"ddpr/rewards/critpt_ai/answer.py" = ["S102", "TRY004"]
-"ddpr/rewards/critpt_ai/runtime.py" = ["BLE001"]
-"ddpr/rewards/critpt_ai/validation.py" = ["SIM101", "SIM102", "TRY004"]
-"ddpr/rewards/critpt_ai/rule/numeric.py" = ["BLE001", "FURB136"]
-"ddpr/rewards/critpt_ai/rule/symbolic.py" = ["BLE001", "S110"]

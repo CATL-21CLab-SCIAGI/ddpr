@@ -9,14 +9,25 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ddpr.rewards.base import Reward
+from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.critpt_ai.inputs import (
+    load_problem as load_task_problem,
+)
+from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.critpt_ai.inputs import (
+    parse_grading_problem,
+)
+from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.critpt_ai.schemas import (
+    GradeReport,
+    GradingInput,
+)
+from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.grader import grade_response
+from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.llm.equivalence import (
+    EquivalenceJudge,
+)
+from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.llm.semantic import (
+    LLMSemanticJudge,
+)
 
-from .critpt_ai.inputs import load_problem as load_task_problem
-from .critpt_ai.inputs import parse_grading_problem
-from .critpt_ai.schemas import GradeReport, GradingInput
-from .grader import grade_response
-from .llm.equivalence import EquivalenceJudge
-from .llm.semantic import LLMSemanticJudge
+from ddpr.rewards.base import Reward
 
 
 class CritptAiRewardError(RuntimeError):

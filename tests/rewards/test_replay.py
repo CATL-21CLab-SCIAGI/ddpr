@@ -13,22 +13,29 @@ pytest.importorskip("pydantic")
 pytest.importorskip("sympy")
 
 import httpx
+from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai import answer
+from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.critpt_ai.inputs import (
+    load_problem,
+)
+from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.llm.equivalence import (
+    EquivalenceJudgeConfig,
+    LLMEquivalenceJudge,
+)
+from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.llm.semantic import (
+    LLMSemanticJudge,
+    SemanticJudgeConfig,
+)
+from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.rule.compare import (
+    grade_with_plan,
+)
+from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.schemas import UnexecutedAnswer
 from ddsr_bench.generation.client import CLIENTS, VLLMClient
 
 from ddpr.rewards.critpt_ai import (
     CritptAiReward,
     CritptAiRewardError,
-    answer,
     grade_response,
 )
-from ddpr.rewards.critpt_ai.critpt_ai.inputs import load_problem
-from ddpr.rewards.critpt_ai.llm.equivalence import (
-    EquivalenceJudgeConfig,
-    LLMEquivalenceJudge,
-)
-from ddpr.rewards.critpt_ai.llm.semantic import LLMSemanticJudge, SemanticJudgeConfig
-from ddpr.rewards.critpt_ai.rule.compare import grade_with_plan
-from ddpr.rewards.critpt_ai.schemas import UnexecutedAnswer
 
 
 @pytest.fixture
