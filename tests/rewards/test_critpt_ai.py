@@ -55,7 +55,7 @@ from ddpr.rewards.critpt_ai import (
     ],
 )
 def test_reward_mapping(monkeypatch, status, extraction, expected):
-    from ddpr.rewards.critpt_ai import reward
+    from ddpr.rewards import critpt_ai as reward
 
     report = GradeReport(
         problem_id="test",
