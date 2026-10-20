@@ -6,8 +6,10 @@ answer processing and report schemas live in DDSR-Bench.
 
 ## Setup
 
-Install the DDSR-Bench checkout containing the merged CritPt-AI integration
-(PR #10) in the same environment as DDPR:
+Install the DDSR-Bench checkout containing the `llm_fallback` API from
+[PR #11](https://github.com/CATL-21CLab-SCIAGI/ddsr-bench/pull/11) in the same
+environment as DDPR. Earlier `0.1.0` checkouts satisfy the version constraint
+but lack this API; update both projects together:
 
 ```bash
 python -m pip install -e ../ddsr-bench -e '.[critpt-ai]'
