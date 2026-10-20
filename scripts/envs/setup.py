@@ -93,7 +93,18 @@ def main() -> None:
         action="store_true",
         help="CPU only: resolve dependencies instead of using the Mac snapshot",
     )
+    parser.add_argument(
+        "--ddsr-bench",
+        type=Path,
+        help="Install this DDSR-Bench checkout for CritPt-AI rewards",
+    )
     args = parser.parse_args()
+    if args.ddsr_bench is not None:
+        source = args.ddsr_bench.resolve()
+        if not (
+            source / "ddsr_bench/benchmarks/critpt/evaluation/ai/grader.py"
+        ).is_file():
+            parser.error("--ddsr-bench must contain the incorporated AI grader")
     if args.resolve and args.profile != "cpu":
         parser.error("--resolve is only supported for the cpu profile")
     if sys.version_info < (3, 12):  # noqa: UP036 - also run before installing ddpr
@@ -120,8 +131,14 @@ def main() -> None:
             ],
             check=True,
         )
+    if args.ddsr_bench is not None:
+        install = [sys.executable, "-m", "pip", "install", "--no-build-isolation"]
+        if args.profile != "cpu":
+            install.append("--no-deps")
+        subprocess.run([*install, "-e", str(source)], check=True)
     subprocess.run(
-        [sys.executable, str(ROOT / "scripts/envs/check.py"), args.profile],
+        [sys.executable, str(ROOT / "scripts/envs/check.py"), args.profile]
+        + (["--critpt-ai"] if args.ddsr_bench is not None else []),
         check=True,
     )
 

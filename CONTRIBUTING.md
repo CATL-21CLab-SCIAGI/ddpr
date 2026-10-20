@@ -29,6 +29,11 @@ pins the local-debug framework sources. For GPU training, see
 [DSW/DLC environments](envs/README.md).
 Inside a ready Slime or Swift GPU container, use `python scripts/envs/setup.py slime`
 or `python scripts/envs/setup.py swift`; these preserve the container's dependencies.
+For CritPt-AI rewards, add `--ddsr-bench /path/to/ddsr-bench` to setup and
+`--critpt-ai` to the checker. CPU setup installs its dependencies; GPU setup
+installs the checkout without replacing container dependencies and reports any
+missing requirements. Provision those requirements in the container image.
+
 See the [Slime guide](ddpr/backends/slime/README.md) and
 [Swift guide](ddpr/backends/swift/README.md) for backend requirements.
 Prefer ModelScope for model artifacts; tokenizer checks do not require weights.
@@ -106,6 +111,34 @@ keep `ddpr/data` independent of training frameworks.
 
 ## Coding conventions
 
+CritPt-AI grading is owned by DDSR-Bench under
+`ddsr_bench/benchmarks/critpt/evaluation/ai/`, independently of consensus
+and shared grading utilities. DDPR's `CritptAiReward` only loads private training
+metadata and maps reports to scores. Preserve external Auto/Freestyle contracts.
+Load prepared tasks through DDSR-Bench's unified CritPt `data` loader; the grader's
+`io` compatibility parser is only for native Auto/Freestyle records.
+Keep provider reuse additive; review redundancy separately before removing clients.
+Grader changes and core tests belong in DDSR-Bench; reward/backend integration
+and replay tests belong here. Install both checkouts when developing this boundary.
+
+For folder reviews, compare the actual sibling `ddsr_bench/grading/` layout and
+review responsibilities and dependencies together, not just individual names.
+Use `utils.py` for shared helpers. Keep rule interfaces consistent:
+`grade_exact_numeric`, `grade_floating_numeric`, `grade_symbolic` and
+`grade_categorical` take `(answer, target, **kwargs)`. Serialized plan fields
+remain unchanged; dispatch unpacks `args`. Numerical cross-checks provide
+evidence rather than grades. Invalid references, configuration and internal
+failures must not become incorrect-answer rewards.
+
+Execution helpers use `grading_plan`, `fn` for a callable, `extract_fn` for the extraction
+callback, and `timeout` in seconds. Keep related getters and constants aligned
+(`grader_timeout`, `DEFAULT_GRADER_TIMEOUT`); document units separately.
+AST expressions use `node`, not callable names.
+
+Scope renames to owned symbols; preserve library attributes such as SymPy `.args`.
+Exercise affected paths with regression tests, including error behavior, rather
+than relying only on a previously passing suite.
+
 Follow the sibling ddsr-bench project's style and compare related code before
 introducing patterns or renaming APIs.
 
@@ -136,6 +169,14 @@ Slime backend tests use the installed package; full CLI checks remain opt-in.
 See [verification](ddpr/backends/slime/README.md#verification).
 Report local tests, tokenizer checks and GPU training separately. Keep changes
 focused and describe the behavior changed, validation performed and limitations.
+
+For package moves, build a wheel from a clean source tree and verify imports,
+assets and license notices. Check obsolete files, cache-only or empty source
+directories, ignored outputs and the final Git diff before committing. Never
+publish private tasks, references, credentials or run artifacts.
+Use static checks for saved corpus code; do not execute it on the host. Keep
+matched references in regression coverage alongside unresolved and different
+cases, and distinguish rule checks from mocked or live LLM assessments.
 
 ## Local and DSW files
 

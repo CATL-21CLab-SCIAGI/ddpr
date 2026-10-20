@@ -6,7 +6,7 @@ from typing import Any
 
 
 class Reward(ABC):
-    """Score one generated response; concrete physics verifiers are not bundled."""
+    """Score one generated response using implementation-specific evidence."""
 
     @abstractmethod
     def __call__(

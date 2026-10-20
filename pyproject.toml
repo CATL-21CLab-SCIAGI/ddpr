@@ -12,6 +12,8 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.8"]
+critpt-ai = ["ddsr-bench>=0.1.0"]
+ddsr = ["ddsr-bench>=0.1.0"]
 
 [tool.setuptools.packages.find]
 include = ["ddpr*"]

@@ -39,7 +39,7 @@ dropping or truncating them. Resume with `--resume_from_checkpoint /path/to/chec
 Set model, data and output as above, then select a shared reward:
 
 ```bash
-export DDPR_REWARD=my_rewards.PhysicsReward
+export DDPR_REWARD=my_rewards.CritptAiReward
 bash scripts/train/swift/qwen38_27b_rl.sh
 ```
 

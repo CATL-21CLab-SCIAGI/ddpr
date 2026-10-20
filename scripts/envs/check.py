@@ -61,7 +61,7 @@ def _dependencies(profile: str) -> list[str]:
     return omitted
 
 
-def check(profile: str) -> dict:
+def check(profile: str, *, critpt_ai: bool = False) -> dict:
     report = {
         "profile": profile,
         "python": platform.python_version(),
@@ -152,6 +152,11 @@ def check(profile: str) -> dict:
         report["errors"].append(str(error))
 
     modules = ["ddpr.data.adapters.ddsr_bench"]
+    if critpt_ai:
+        modules += [
+            "ddpr.rewards.critpt_ai",
+            "ddsr_bench.benchmarks.critpt.data.loader",
+        ]
     if profile in {"cpu", "slime"}:
         modules += ["ddpr.backends.slime.plugin", "slime.utils.mask_utils"]
     if profile in {"cpu", "swift"}:
@@ -176,8 +181,9 @@ def check(profile: str) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("profile", choices=("cpu", "slime", "swift"))
+    parser.add_argument("--critpt-ai", action="store_true")
     args = parser.parse_args()
-    report = check(args.profile)
+    report = check(args.profile, critpt_ai=args.critpt_ai)
     print(json.dumps(report, indent=2))
     sys.exit(bool(report["errors"]))
 
