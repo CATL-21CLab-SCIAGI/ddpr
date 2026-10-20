@@ -6,9 +6,9 @@ import pytest
 
 pytest.importorskip("pydantic")
 
-from ddpr.rewards.physics.llm.clients import bedrock, client, openai
-from ddpr.rewards.physics.llm.equivalence import EquivalenceJudgeConfig
-from ddpr.rewards.physics.llm.semantic import SemanticJudgeConfig
+from ddpr.rewards.critpt_ai.llm.clients import bedrock, client, openai
+from ddpr.rewards.critpt_ai.llm.equivalence import EquivalenceJudgeConfig
+from ddpr.rewards.critpt_ai.llm.semantic import SemanticJudgeConfig
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])

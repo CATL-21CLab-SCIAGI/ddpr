@@ -1,4 +1,4 @@
-"""Assess physics responses independently of the training reward contract."""
+"""Assess CritPt-AI responses independently of the training reward contract."""
 
 from __future__ import annotations
 

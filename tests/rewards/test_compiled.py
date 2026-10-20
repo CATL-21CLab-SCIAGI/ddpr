@@ -10,10 +10,10 @@ import pytest
 pytest.importorskip("pydantic")
 pytest.importorskip("sympy")
 
-from ddpr.rewards.physics import PhysicsReward, PhysicsRewardError, grade_response
-from ddpr.rewards.physics.critpt_ai.inputs import load_problem
-from ddpr.rewards.physics.llm.semantic import LLMSemanticJudge, SemanticJudgeConfig
-from ddpr.rewards.physics.rule.compare import grade_with_plan
+from ddpr.rewards.critpt_ai import CritptAiReward, CritptAiRewardError, grade_response
+from ddpr.rewards.critpt_ai.critpt_ai.inputs import load_problem
+from ddpr.rewards.critpt_ai.llm.semantic import LLMSemanticJudge, SemanticJudgeConfig
+from ddpr.rewards.critpt_ai.rule.compare import grade_with_plan
 
 
 def _tasks():
@@ -67,7 +67,7 @@ def test_compiled_literal_reference(task):
 @pytest.mark.parametrize("task", _tasks())
 def test_compiled_problem(task):
     problem = load_problem(task)
-    from ddpr.rewards.physics import load_problem as load_reward_problem
+    from ddpr.rewards.critpt_ai import load_problem as load_reward_problem
 
     metadata = {"task_path": str(task.resolve())}
     assert load_reward_problem(metadata) == problem
@@ -76,7 +76,7 @@ def test_compiled_problem(task):
         report = grade_response(problem, "", judge_enabled=False)
         assert report.extraction_status == "missing_answer_function"
         assert (
-            PhysicsReward(judge_enabled=False)(
+            CritptAiReward(judge_enabled=False)(
                 response="",
                 sample_id=task.name,
                 reference_completion="UNVERIFIED_TEACHER",
@@ -105,7 +105,7 @@ def test_compiled_problem(task):
                 }
             )
 
-        scorer = PhysicsReward(
+        scorer = CritptAiReward(
             semantic_judge=LLMSemanticJudge(
                 config=SemanticJudgeConfig(model="mock"), completion=complete
             )
@@ -117,7 +117,7 @@ def test_compiled_problem(task):
             "metadata": metadata,
         }
         if expected is None:
-            with pytest.raises(PhysicsRewardError):
+            with pytest.raises(CritptAiRewardError):
                 scorer(**kwargs)
         else:
             assert scorer(**kwargs) == expected

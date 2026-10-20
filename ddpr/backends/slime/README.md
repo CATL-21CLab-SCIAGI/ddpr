@@ -49,7 +49,7 @@ batching and parallelism consistent. Optimizer state and dataset cursor are save
 Set model, data and output as above, then configure reward and GPU allocation:
 
 ```bash
-export DDPR_REWARD=my_rewards.PhysicsReward
+export DDPR_REWARD=my_rewards.CritptAiReward
 export DDPR_ACTOR_GPUS=2
 export DDPR_ROLLOUT_GPUS=2
 export DDPR_ROLLOUT_GPUS_PER_ENGINE=2

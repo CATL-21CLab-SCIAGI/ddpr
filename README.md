@@ -7,7 +7,7 @@ and reinforcement learning (RL) with Slime or MS-Swift. SFT supervises only the
 completion; RL generates new responses and passes teacher references to rewards.
 Both backends have passed Qwen3.8-27B SFT and RL (GRPO) optimizer-update checks
 on H20: Slime with selected decoder layers trainable, and Swift with LoRA.
-RL optimizer checks use synthetic rewards. Optional Auto/Freestyle physics
+RL optimizer checks use synthetic rewards. Optional Auto/Freestyle CritPt-AI
 rewards are available and tested separately on CPU.
 Both backends accept caller-supplied rewards through their native hooks.
 
@@ -101,30 +101,32 @@ Slime and Swift adapters pass the fields above and preserve response order.
 `DDPR_REWARD` overrides native reward settings, including in smoke jobs; unset it
 to use native hooks in regular RL or the default synthetic reward in smoke jobs.
 
-### Auto/Freestyle physics reward
+### Auto/Freestyle CritPt-AI reward
 
 Install the optional grading dependencies and select the shared implementation:
 
 ```bash
-python -m pip install -e '.[physics]'
-export DDPR_REWARD=ddpr.rewards.physics.PhysicsReward
+python -m pip install -e '.[critpt-ai]'
+export DDPR_REWARD=ddpr.rewards.critpt_ai.CritptAiReward
 ```
 
 Each record must supply exactly one canonical grading source in private metadata:
 `metadata.problem` containing the native Auto/Freestyle `problem.json` object, or
-`metadata.problem_path` containing its absolute path, readable on every worker.
+`metadata.problem_path` containing its absolute path, or `metadata.task_path`
+pointing to a compiled CritPt-AI task (requires DDSR-Bench). Paths must be readable
+on every worker.
 Teacher `reference_completion` stays in the shared interface but is ignored.
 Keep the student's prompt public: do not put grading plans or references into
 `prompt`/`messages`. Neither backend adds private metadata to the policy prompt.
 
 The reward is 1.0 for correct and 0.0 for incorrect responses. Judge uncertainty,
-API failures and grader errors raise `PhysicsRewardError` with a detailed report;
+API failures and grader errors raise `CritptAiRewardError` with a detailed report;
 they are not zero rewards. Dataset/configuration errors also surface as errors.
 Auto supports floating numeric, exact, symbolic and categorical answers, with
 optional exact/symbolic equivalence judging. Freestyle uses SemanticJudge and
 supports multiple answer items. Auto composite is not connected yet.
 
-See [physics reward usage and configuration](ddpr/rewards/physics/README.md).
+See [CritPt-AI reward usage and configuration](ddpr/rewards/critpt_ai/README.md).
 The grading code is bundled; the generation repositories and standalone grader
 package are not runtime dependencies. GPU training with this reward has not been
 validated. Existing backend adapters score serially within each reward process;

@@ -7,14 +7,14 @@ import pytest
 pytest.importorskip("pydantic")
 pytest.importorskip("sympy")
 
-from ddpr.rewards.physics import answer
-from ddpr.rewards.physics.answer import extract_answer_locally
-from ddpr.rewards.physics.rule.compare import grade_with_plan
-from ddpr.rewards.physics.rule.symbolic import grade_symbolic
-from ddpr.rewards.physics.runtime import (
+from ddpr.rewards.critpt_ai import answer
+from ddpr.rewards.critpt_ai.answer import extract_answer_locally
+from ddpr.rewards.critpt_ai.rule.compare import grade_with_plan
+from ddpr.rewards.critpt_ai.rule.symbolic import grade_symbolic
+from ddpr.rewards.critpt_ai.runtime import (
     run_with_deadline,
 )
-from ddpr.rewards.physics.schemas import GradingPlan, UnexecutedAnswer
+from ddpr.rewards.critpt_ai.schemas import GradingPlan, UnexecutedAnswer
 
 
 @pytest.mark.parametrize(
@@ -112,7 +112,7 @@ def test_submitted_assumptions_cannot_change_reference(actual):
 
 @pytest.mark.parametrize("reverse", [False, True])
 def test_conflicting_aliases_are_rejected(reverse):
-    from ddpr.rewards.physics.rule.categorical import grade_categorical
+    from ddpr.rewards.critpt_ai.rule.categorical import grade_categorical
 
     items = [("A", ["B"]), ("B", [])]
     aliases = dict(reversed(items) if reverse else items)

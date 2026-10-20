@@ -11,9 +11,9 @@ pytest.importorskip("pydantic")
 import httpx
 from ddsr_bench.generation.client import CLIENTS, ClientError, VLLMClient
 
-from ddpr.rewards.physics import load_problem
-from ddpr.rewards.physics.llm.clients.client import DdsrBackend
-from ddpr.rewards.physics.llm.clients.config import ClientConfig
+from ddpr.rewards.critpt_ai import load_problem
+from ddpr.rewards.critpt_ai.llm.clients.client import DdsrBackend
+from ddpr.rewards.critpt_ai.llm.clients.config import ClientConfig
 
 
 @pytest.mark.parametrize("inside_loop", [False, True])
@@ -110,7 +110,10 @@ def test_task_metadata(metadata, error):
 
 
 def test_semantic_response_parsing(monkeypatch):
-    from ddpr.rewards.physics.llm.semantic import LLMSemanticJudge, SemanticJudgeConfig
+    from ddpr.rewards.critpt_ai.llm.semantic import (
+        LLMSemanticJudge,
+        SemanticJudgeConfig,
+    )
 
     verdict = {
         "verdict": "incorrect",
@@ -165,7 +168,7 @@ def test_semantic_response_parsing(monkeypatch):
 @pytest.mark.parametrize("backend", ["vllm", "openai", "aliyun"])
 @pytest.mark.parametrize("status", [200, 401, 503])
 def test_default_dispatch(monkeypatch, backend, status):
-    from ddpr.rewards.physics.llm.clients.client import complete_judge
+    from ddpr.rewards.critpt_ai.llm.clients.client import complete_judge
 
     provider = CLIENTS[backend]
     requests, clients = [], []

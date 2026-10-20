@@ -1,4 +1,4 @@
-# Physics rewards
+# CritPt-AI rewards
 
 This module scores an already-generated student response against a canonical
 native Auto_CritPt or Freestyle_CritPt problem. It does not run a solver, generate
@@ -8,8 +8,8 @@ of Auto_CritPt_Grader 0.6.0; see [UPSTREAM.md](UPSTREAM.md).
 
 ## Input
 
-Install `ddpr[physics]` and set
-`DDPR_REWARD=ddpr.rewards.physics.PhysicsReward` for Slime or Swift.
+Install `ddpr[critpt-ai]` and set
+`DDPR_REWARD=ddpr.rewards.critpt_ai.CritptAiReward` for Slime or Swift.
 Pass exactly one source in the existing sample metadata:
 
 ```python
@@ -80,9 +80,9 @@ There is no partial-credit policy added by this integration.
 
 ## Results and errors
 
-`PhysicsReward` returns a float: 1.0 for pass, 0.0 for fail or an invalid student
+`CritptAiReward` returns a float: 1.0 for pass, 0.0 for fail or an invalid student
 answer. Resource limits remain unresolved. If the grading core cannot determine
-correctness, it raises `PhysicsRewardError`; its `.report` is a serializable Pydantic `GradeReport` and
+correctness, it raises `CritptAiRewardError`; its `.report` is a serializable Pydantic `GradeReport` and
 `.sample_id` identifies the affected attempt. The exception is pickle-safe.
 Invalid problem metadata raises input-validation errors. Grader failures appear
 in the report; errors configuring the reward itself propagate directly.
@@ -91,11 +91,11 @@ controller must explicitly retry, skip, or stop on them.
 
 For diagnostics outside the trainer:
 
-`grader.grade_response` returns assessments; `PhysicsReward` owns training score
+`grader.grade_response` returns assessments; `CritptAiReward` owns training score
 mapping. Use `grading_status` and `extraction_status` for diagnostics.
 
 ```python
-from ddpr.rewards.physics import grade_response, load_problem
+from ddpr.rewards.critpt_ai import grade_response, load_problem
 
 problem = load_problem(metadata)
 report = grade_response(problem, student_response)
@@ -121,7 +121,7 @@ or a local `.env`, never from problem metadata.
   `TIMEOUT_SECONDS`, `BASE_URL`, `API_KEY_ENV`, `HTTP_MAX_ATTEMPTS`,
   `HTTP_BACKOFF_SECONDS`, `EXTRA_BODY_JSON`.
 - Auto confidence threshold: `AUTO_CRITPT_GRADER_JUDGE_MIN_CONFIDENCE` (0.90).
-- `DDPR_PHYSICS_EQUIVALENCE_JUDGE=false` disables only Auto's fallback. An
+- `DDPR_CRITPT_AI_EQUIVALENCE_JUDGE=false` disables only Auto's fallback. An
   unsupported expression without a Judge remains unresolved, not a wrong answer.
   Freestyle still uses SemanticJudge.
 - Local limits: `AUTO_CRITPT_GRADER_TIMEOUT_SECONDS` (120s) and
@@ -136,15 +136,15 @@ Set both prefixes when switching both Judges. No LLM call is made on module
 import or reward construction; Auto deterministic passes do not call a Judge.
 
 For explicit configuration, import `LLMEquivalenceJudge` and
-`EquivalenceJudgeConfig` from `ddpr.rewards.physics.llm.equivalence`, or
+`EquivalenceJudgeConfig` from `ddpr.rewards.critpt_ai.llm.equivalence`, or
 `LLMSemanticJudge` and `SemanticJudgeConfig` from
-`ddpr.rewards.physics.llm.semantic`, and pass the configured instance to
-`PhysicsReward(equivalence_judge=...)` or `PhysicsReward(semantic_judge=...)`.
+`ddpr.rewards.critpt_ai.llm.semantic`, and pass the configured instance to
+`CritptAiReward(equivalence_judge=...)` or `CritptAiReward(semantic_judge=...)`.
 
 Both judges accept `completion=complete`, where the synchronous callable has the
 signature `complete(messages, config) -> str | CompletionResult`. It replaces
 provider calls without changing prompts, parsing or grading policy. Return
-`CompletionResult` from `physics.schemas` to retain model, request ID and usage.
+`CompletionResult` from `critpt_ai.schemas` to retain model, request ID and usage.
 The caller owns any injected client's lifecycle.
 
 The added `ddsr` backend uses DDSR-Bench generation clients through the normal
@@ -152,7 +152,7 @@ client dispatcher. Existing `openai` and `bedrock` behavior remains unchanged.
 Install the sibling checkout and optional dependencies:
 
 ```bash
-python -m pip install -e ../ddsr-bench -e '.[physics,ddsr]'
+python -m pip install -e ../ddsr-bench -e '.[critpt-ai,ddsr]'
 ```
 
 For example, configure the Freestyle judge on every worker:
@@ -187,7 +187,7 @@ task directories in order; each entry uses the same validation.
 ## Verification
 
 ```bash
-python -m pip install -e '.[dev,physics]'
+python -m pip install -e '.[dev,critpt-ai]'
 python -m pytest -q tests/rewards tests/test_rewards.py
 python -m ruff check .
 python -m ruff format --check .
@@ -226,7 +226,22 @@ and excluded from Git.
 Saved-response checks on the same date replayed all ten rule references with
 unchanged results. A live Qwen3.8-Max check through `grade_response` accepted one
 Freestyle reference and rejected a wrong answer and an abstention. Replaying
-those identical requests through `PhysicsReward` returned 1, 0 and 0. Artifacts
+those identical requests through `CritptAiReward` returned 1, 0 and 0. Artifacts
 are under `data/physics-check/saved-response-20260930/`. These checks execute no
 corpus code; the full rule path, which runs answer functions, remains unverified
 on these references.
+
+To replay the saved assessments through the current DDSR-Bench client adapter:
+
+```bash
+PYTHONPATH=../ddsr-bench \
+DDPR_TEST_CRITPT_TASKS=../ddsr-bench/tasks/critpt-ai \
+DDPR_TEST_CRITPT_AI_REPLAY=data/physics-check/saved-response-20260930 \
+python -m pytest -q tests/rewards/test_replay.py
+```
+
+This offline check verifies input hashes and exact judge messages before replaying
+saved completions through a mocked HTTP transport. It checks static rule-reference
+outcomes, semantic reports/rewards and unresolved provider failures. Network access
+and corpus execution are blocked; it does not establish live provider availability
+or rule execution isolation.

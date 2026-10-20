@@ -15,21 +15,21 @@ pytest.importorskip("pydantic")
 pytest.importorskip("sympy")
 
 from ddpr.rewards import load_reward
-from ddpr.rewards.physics import (
-    PhysicsReward,
-    PhysicsRewardError,
+from ddpr.rewards.critpt_ai import (
+    CritptAiReward,
+    CritptAiRewardError,
     answer,
     grade_response,
     grader,
     load_problem,
 )
-from ddpr.rewards.physics.critpt_ai.schemas import GradeReport
-from ddpr.rewards.physics.llm.equivalence import (
+from ddpr.rewards.critpt_ai.critpt_ai.schemas import GradeReport
+from ddpr.rewards.critpt_ai.llm.equivalence import (
     EquivalenceJudgeConfig,
     LLMEquivalenceJudge,
 )
-from ddpr.rewards.physics.llm.semantic import LLMSemanticJudge, SemanticJudgeConfig
-from ddpr.rewards.physics.runtime import GraderTimeout
+from ddpr.rewards.critpt_ai.llm.semantic import LLMSemanticJudge, SemanticJudgeConfig
+from ddpr.rewards.critpt_ai.runtime import GraderTimeout
 
 
 @pytest.mark.parametrize(
@@ -50,7 +50,7 @@ from ddpr.rewards.physics.runtime import GraderTimeout
     ],
 )
 def test_reward_mapping(monkeypatch, status, extraction, expected):
-    from ddpr.rewards.physics import reward
+    from ddpr.rewards.critpt_ai import reward
 
     report = GradeReport(
         problem_id="test",
@@ -64,11 +64,11 @@ def test_reward_mapping(monkeypatch, status, extraction, expected):
     monkeypatch.setattr(reward, "grade_response", lambda *args, **kwargs: report)
     assert "reward" not in report.model_dump()
     if expected is None:
-        with pytest.raises(PhysicsRewardError) as raised:
-            score(PhysicsReward(), auto_problem(), "")
+        with pytest.raises(CritptAiRewardError) as raised:
+            score(CritptAiReward(), auto_problem(), "")
         assert raised.value.report is report
     else:
-        assert score(PhysicsReward(), auto_problem(), "") == expected
+        assert score(CritptAiReward(), auto_problem(), "") == expected
 
 
 def auto_problem(kind="exact", expected="sqrt(3)/2", args=None):
@@ -180,7 +180,7 @@ def score(scorer, problem, response, teacher="UNVERIFIED_TEACHER_SENTINEL"):
 )
 def test_four_auto_types(kind, expected, args, expression, passed):
     problem = auto_problem(kind, expected, args)
-    scorer = PhysicsReward(judge_enabled=False)
+    scorer = CritptAiReward(judge_enabled=False)
     assert score(scorer, problem, block(expression)) == float(passed)
 
 
@@ -253,9 +253,9 @@ def test_missing_sympy_is_not_a_zero_reward(monkeypatch, failed_import):
         return original_import(name, globals, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", import_module)
-    with pytest.raises(PhysicsRewardError) as raised:
+    with pytest.raises(CritptAiRewardError) as raised:
         score(
-            PhysicsReward(judge_enabled=False), auto_problem("exact", "2"), block("2")
+            CritptAiReward(judge_enabled=False), auto_problem("exact", "2"), block("2")
         )
     assert imports == failed_import
     assert raised.value.report.grading_status == "grader_error"
@@ -277,8 +277,8 @@ def test_comparison_errors_are_not_zero_rewards(monkeypatch, kind, expression, e
         else auto_problem("exact", "2")
     )
     response = block(expression)
-    with pytest.raises(PhysicsRewardError) as raised:
-        score(PhysicsReward(judge_enabled=False), problem, response)
+    with pytest.raises(CritptAiRewardError) as raised:
+        score(CritptAiReward(judge_enabled=False), problem, response)
     assert raised.value.report.grading_status == "grader_error"
     assert raised.value.report.extraction_status == "success"
     assert raised.value.report.extracted_answer is not None
@@ -301,7 +301,7 @@ def test_unsupported_sympy_is_inert_but_can_reach_judge(monkeypatch):
 
     monkeypatch.setattr(answer, "_execute_answer_code", forbidden)
     prompts = []
-    scorer = PhysicsReward(equivalence_judge=equivalence(prompts=prompts))
+    scorer = CritptAiReward(equivalence_judge=equivalence(prompts=prompts))
     problem = auto_problem("symbolic", "fresnels(x)", {"variables": ["x"]})
     assert score(scorer, problem, block("sp.fresnels(x)")) == 1
     rendered = json.dumps(prompts)
@@ -330,9 +330,11 @@ def test_unresolved_is_exception_not_zero(monkeypatch, failure):
             config=EquivalenceJudgeConfig(model="test"),
             completion=unavailable,
         )
-    scorer = PhysicsReward(judge_enabled=failure != "disabled", equivalence_judge=judge)
+    scorer = CritptAiReward(
+        judge_enabled=failure != "disabled", equivalence_judge=judge
+    )
     problem = auto_problem("symbolic", "x", {"variables": ["x"]})
-    with pytest.raises(PhysicsRewardError) as raised:
+    with pytest.raises(CritptAiRewardError) as raised:
         score(scorer, problem, block("sp.fresnels(x)"))
     error = raised.value
     assert "reward" not in error.report.model_dump()
@@ -343,9 +345,9 @@ def test_unresolved_is_exception_not_zero(monkeypatch, failure):
 
 
 def test_exact_numeric_conflict_is_unresolved():
-    with pytest.raises(PhysicsRewardError) as raised:
+    with pytest.raises(CritptAiRewardError) as raised:
         score(
-            PhysicsReward(equivalence_judge=equivalence("equivalent")),
+            CritptAiReward(equivalence_judge=equivalence("equivalent")),
             auto_problem(expected="2"),
             block("sp.Integer(3)"),
         )
@@ -356,7 +358,7 @@ def test_exact_numeric_conflict_is_unresolved():
 @pytest.mark.parametrize("verdict,expected", [("correct", 1.0), ("incorrect", 0.0)])
 def test_freestyle_multiple_items_and_teacher_ignored(verdict, expected):
     prompts = []
-    scorer = PhysicsReward(
+    scorer = CritptAiReward(
         judge_enabled=False, semantic_judge=semantic(verdict, prompts)
     )
     assert score(scorer, freestyle_problem(), "E=2; stable.") == expected
@@ -368,8 +370,8 @@ def test_freestyle_multiple_items_and_teacher_ignored(verdict, expected):
 
 
 def test_freestyle_uncertain_and_empty_response():
-    scorer = PhysicsReward(semantic_judge=semantic("uncertain"))
-    with pytest.raises(PhysicsRewardError):
+    scorer = CritptAiReward(semantic_judge=semantic("uncertain"))
+    with pytest.raises(CritptAiRewardError):
         score(scorer, freestyle_problem(), "Maybe stable")
     assert score(scorer, freestyle_problem(), "") == 0
 
@@ -384,7 +386,7 @@ def test_report_round_trip_preserves_judgment(verdict):
 
 
 def test_reference_completion_cannot_override_ground_truth():
-    scorer = PhysicsReward(judge_enabled=False)
+    scorer = CritptAiReward(judge_enabled=False)
     problem = auto_problem(expected="1")
     assert score(scorer, problem, block("1"), teacher=block("2")) == 1
     assert score(scorer, problem, block("2"), teacher=block("2")) == 0
@@ -452,7 +454,7 @@ def test_nontext_response_is_rejected_before_execution(monkeypatch, response):
 
 def test_grading_can_be_relocated_without_ddpr(tmp_path):
     source = Path(grader.__file__).parent
-    target = tmp_path / "standalone_physics"
+    target = tmp_path / "standalone_critpt_ai"
     shutil.copytree(
         source,
         target,
@@ -464,8 +466,8 @@ def test_grading_can_be_relocated_without_ddpr(tmp_path):
 import json
 import sys
 sys.path.insert(0, sys.argv[1])
-from standalone_physics.grader import grade_response
-from standalone_physics.critpt_ai.inputs import parse_grading_problem
+from standalone_critpt_ai.grader import grade_response
+from standalone_critpt_ai.critpt_ai.inputs import parse_grading_problem
 problem = parse_grading_problem(json.loads(sys.argv[2]))
 report = grade_response(problem, "", judge_enabled=False)
 assert report.extraction_status == "missing_answer_function"
@@ -481,16 +483,16 @@ assert not any(name == "ddpr" or name.startswith("ddpr.") for name in sys.module
 
 
 def test_zero_argument_reward_loads_with_environment(monkeypatch):
-    monkeypatch.setenv("DDPR_PHYSICS_EQUIVALENCE_JUDGE", "false")
+    monkeypatch.setenv("DDPR_CRITPT_AI_EQUIVALENCE_JUDGE", "false")
     load_reward.cache_clear()
-    assert not load_reward("ddpr.rewards.physics.PhysicsReward").judge_enabled
-    monkeypatch.setenv("DDPR_PHYSICS_EQUIVALENCE_JUDGE", "invalid")
+    assert not load_reward("ddpr.rewards.critpt_ai.CritptAiReward").judge_enabled
+    monkeypatch.setenv("DDPR_CRITPT_AI_EQUIVALENCE_JUDGE", "invalid")
     with pytest.raises(ValueError, match="must be true or false"):
-        PhysicsReward()
+        CritptAiReward()
     load_reward.cache_clear()
 
 
-def test_core_reward_import_does_not_require_physics_dependencies():
+def test_core_reward_import_does_not_require_critpt_ai_dependencies():
     result = subprocess.run(
         [
             sys.executable,
@@ -509,7 +511,7 @@ def test_slime_reward_calls_real_grader_from_worker_thread(monkeypatch):
     from ddpr.backends.slime import reward
 
     monkeypatch.setattr(
-        reward, "load_reward", lambda _path: PhysicsReward(judge_enabled=False)
+        reward, "load_reward", lambda _path: CritptAiReward(judge_enabled=False)
     )
     problem = auto_problem(expected="1")
     samples = [
@@ -528,12 +530,12 @@ def test_slime_reward_calls_real_grader_from_worker_thread(monkeypatch):
 
 
 def test_rule_comparisons():
-    from ddpr.rewards.physics.rule.categorical import grade_categorical
-    from ddpr.rewards.physics.rule.numeric import (
+    from ddpr.rewards.critpt_ai.rule.categorical import grade_categorical
+    from ddpr.rewards.critpt_ai.rule.numeric import (
         grade_exact_numeric,
         grade_floating_numeric,
     )
-    from ddpr.rewards.physics.rule.symbolic import grade_symbolic
+    from ddpr.rewards.critpt_ai.rule.symbolic import grade_symbolic
 
     assert grade_exact_numeric(answer="sqrt(4)", target="2").passed
     assert grade_symbolic(answer="x+x", target="2*x", variables=["x"]).passed
@@ -547,12 +549,14 @@ def test_swift_adapter_with_mocked_framework(monkeypatch):
     framework.orms = {}
     monkeypatch.setitem(sys.modules, "swift.rewards", framework)
     source = Path(__file__).parents[2] / "ddpr/backends/swift/reward.py"
-    spec = importlib.util.spec_from_file_location("physics_swift_adapter_test", source)
+    spec = importlib.util.spec_from_file_location(
+        "critpt_ai_swift_adapter_test", source
+    )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    monkeypatch.setenv("DDPR_REWARD", "ddpr.rewards.physics.PhysicsReward")
+    monkeypatch.setenv("DDPR_REWARD", "ddpr.rewards.critpt_ai.CritptAiReward")
     monkeypatch.setattr(
-        module, "load_reward", lambda _path: PhysicsReward(judge_enabled=False)
+        module, "load_reward", lambda _path: CritptAiReward(judge_enabled=False)
     )
     adapter = module.RewardAdapter()
     assert adapter(
@@ -576,17 +580,17 @@ def test_swift_adapter_with_mocked_framework(monkeypatch):
 def test_invalid_references_are_not_zero_rewards(kind, expected, args):
     problem = auto_problem(kind, expected, args)
     response = block("1.0" if kind == "floating_numeric" else "2")
-    with pytest.raises(PhysicsRewardError) as raised:
-        score(PhysicsReward(judge_enabled=False), problem, response)
+    with pytest.raises(CritptAiRewardError) as raised:
+        score(CritptAiReward(judge_enabled=False), problem, response)
     assert raised.value.report.grading_status == "grader_error"
 
 
 @pytest.mark.parametrize("timeout", ["0", "nan", "inf", "invalid"])
 def test_invalid_numeric_timeout_is_a_grader_error(monkeypatch, timeout):
     monkeypatch.setenv("AUTO_CRITPT_NUMERIC_CHECK_TIMEOUT_SECONDS", timeout)
-    with pytest.raises(PhysicsRewardError) as raised:
+    with pytest.raises(CritptAiRewardError) as raised:
         score(
-            PhysicsReward(equivalence_judge=forbidden_judge()),
+            CritptAiReward(equivalence_judge=forbidden_judge()),
             auto_problem(expected="2"),
             block("3"),
         )
@@ -650,7 +654,7 @@ def test_native_report_formatting(freestyle):
 
     from sympy import Rational
 
-    from ddpr.rewards.physics.critpt_ai.outputs import format_report
+    from ddpr.rewards.critpt_ai.critpt_ai.outputs import format_report
 
     problem = load_problem(
         {"problem": freestyle_problem() if freestyle else auto_problem()}
@@ -696,9 +700,9 @@ def test_native_report_formatting(freestyle):
 def test_invalid_reference_cannot_be_an_incorrect_answer(
     kind, target, kwargs, response
 ):
-    with pytest.raises(PhysicsRewardError) as raised:
+    with pytest.raises(CritptAiRewardError) as raised:
         score(
-            PhysicsReward(judge_enabled=False),
+            CritptAiReward(judge_enabled=False),
             auto_problem(kind, target, kwargs),
             block(response),
         )

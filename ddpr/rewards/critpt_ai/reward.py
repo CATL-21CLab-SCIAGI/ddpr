@@ -1,4 +1,4 @@
-"""Map physics grading results to DDPR training rewards."""
+"""Map CritPt-AI grading results to DDPR training rewards."""
 
 from __future__ import annotations
 
@@ -19,14 +19,14 @@ from .llm.equivalence import EquivalenceJudge
 from .llm.semantic import LLMSemanticJudge
 
 
-class PhysicsRewardError(RuntimeError):
+class CritptAiRewardError(RuntimeError):
     """No reliable reward is available; the report distinguishes why."""
 
     def __init__(self, report: GradeReport, sample_id: str | None = None) -> None:
         self.report = report
         self.sample_id = sample_id
         super().__init__(
-            f"Physics reward unresolved for {sample_id or report.problem_id}: "
+            f"CritPt-AI reward unresolved for {sample_id or report.problem_id}: "
             f"{report.grading_status}. {report.error_message or 'See grading report.'}"
         )
 
@@ -63,14 +63,14 @@ def load_problem(metadata: Mapping[str, Any]) -> GradingInput:
 
 
 def _judge_enabled() -> bool:
-    value = os.getenv("DDPR_PHYSICS_EQUIVALENCE_JUDGE", "true").strip().casefold()
+    value = os.getenv("DDPR_CRITPT_AI_EQUIVALENCE_JUDGE", "true").strip().casefold()
     if value not in {"true", "false", "1", "0"}:
-        raise ValueError("DDPR_PHYSICS_EQUIVALENCE_JUDGE must be true or false")
+        raise ValueError("DDPR_CRITPT_AI_EQUIVALENCE_JUDGE must be true or false")
     return value in {"true", "1"}
 
 
 @dataclass(frozen=True, slots=True)
-class PhysicsReward(Reward):
+class CritptAiReward(Reward):
     """Binary correctness reward; verifier errors are never converted to zero."""
 
     judge_enabled: bool = field(default_factory=_judge_enabled)
@@ -106,4 +106,4 @@ class PhysicsReward(Reward):
             "runtime_failure",
         }:
             return 0.0
-        raise PhysicsRewardError(report=report, sample_id=sample_id)
+        raise CritptAiRewardError(report=report, sample_id=sample_id)

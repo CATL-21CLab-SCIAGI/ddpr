@@ -7,7 +7,7 @@ import pytest
 pytest.importorskip("pydantic")
 pytest.importorskip("sympy")
 
-from ddpr.rewards.physics.runtime import (
+from ddpr.rewards.critpt_ai.runtime import (
     GraderTimeout,
     grader_timeout,
     run_with_deadline,

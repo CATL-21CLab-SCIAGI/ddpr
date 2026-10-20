@@ -16,7 +16,7 @@ from ddsr_bench.benchmarks.critpt.evaluation.prepare import compile_problem
 from ddsr_bench.benchmarks.critpt.generation.prompts import load_prompts
 from ddsr_bench.benchmarks.utils import Resources
 
-from ddpr.rewards.physics.critpt_ai.inputs import load_problem, load_problems
+from ddpr.rewards.critpt_ai.critpt_ai.inputs import load_problem, load_problems
 
 
 @pytest.fixture(params=["rule", "llm"])

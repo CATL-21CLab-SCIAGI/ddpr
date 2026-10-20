@@ -106,7 +106,7 @@ keep `ddpr/data` independent of training frameworks.
 
 ## Coding conventions
 
-Physics grading keeps rules, LLM assessments, execution and model clients separate;
+CritPt-AI grading keeps rules, LLM assessments, execution and model clients separate;
 the DDPR reward maps assessments to training scores. `llm/clients/` owns provider
 calls and configuration; `llm/` owns assessment prompts and policy. Keep this
 implementation independent of consensus. `critpt_ai/` owns native Auto/Freestyle problem formats,
@@ -114,8 +114,9 @@ parsing and report formatting; it is an I/O adapter, not the grading engine.
 Root `grader.py` owns orchestration. Root `schemas.py` holds shared grading plans,
 precision, assessment and completion types. `answer.py`, `validation.py` and
 `runtime.py` own shared answer processing, checks and deadlines. Classify code
-by its responsibility and consumers, not its upstream origin: grading plans and
-the `answer()` convention are not CritPt-AI-specific. Judges consume shared types
+by its responsibility and consumers: these grading plans and the `answer()`
+convention belong to this CritPt-AI grader, while the nested I/O adapter owns
+the external Auto/Freestyle representation. Judges consume shared types
 or explicit public/reference data, not native problem models. The public
 `grade_response` entry point and reward loader retain the native I/O boundary.
 DDSR-Bench integration is additive: `backend=ddsr` selects its generation

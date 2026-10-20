@@ -70,7 +70,7 @@ Integration changes:
   unresolved errors instead of becoming incorrect-answer scores.
 - Empty grading targets are invalid inputs. Legacy Freestyle normalization accepts
   mappings consistently with the loader. A resource-limit report is unresolved
-  in `PhysicsReward`, not an incorrect-answer score.
+  in `CritptAiReward`, not an incorrect-answer score.
 - Reference and configuration failures raise rather than penalizing answers.
   Unsupported reference operations retain the text-only LLM fallback. Symbol
   assumptions come from the problem contract, never from submitted expressions.
@@ -96,7 +96,7 @@ Integration changes:
   `reward.py` owns training metadata loading and score mapping.
   Removed the report's `schema_version`
   and derived `reward` fields and reward validator. The same score mapping
-  now lives in `PhysicsReward`.
+  now lives in `CritptAiReward`.
 - Removed `run_and_grade`, its completion normalizer and unused grading helper
   from evaluator.py. DDPR supplies the student's response; no solver is bundled.
 - Removed solver/batch report schemas and the solver-only Bedrock backend class
@@ -111,7 +111,7 @@ comparison implementations live in `rule/numeric.py`, `rule/symbolic.py` and
 `rule/categorical.py`. SemanticJudge and the optional Auto
 equivalence Judge live in `llm/semantic.py` and `llm/equivalence.py`.
 For raw responses, always use
-`physics.grade_response` or `PhysicsReward` so extraction and deadlines apply.
+`critpt_ai.grade_response` or `CritptAiReward` so extraction and deadlines apply.
 
 Future upstream syncs should review these omissions, run the DDPR reward tests,
 and compare saved-response results before changing this revision. Do not copy

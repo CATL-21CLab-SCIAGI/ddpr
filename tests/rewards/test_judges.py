@@ -6,14 +6,14 @@ import pytest
 pytest.importorskip("pydantic")
 pytest.importorskip("sympy")
 
-from ddpr.rewards.physics import grade_response
-from ddpr.rewards.physics.llm.clients import bedrock, client
-from ddpr.rewards.physics.llm.equivalence import (
+from ddpr.rewards.critpt_ai import grade_response
+from ddpr.rewards.critpt_ai.llm.clients import bedrock, client
+from ddpr.rewards.critpt_ai.llm.equivalence import (
     EquivalenceJudgeConfig,
     LLMEquivalenceJudge,
 )
-from ddpr.rewards.physics.llm.semantic import LLMSemanticJudge, SemanticJudgeConfig
-from ddpr.rewards.physics.schemas import CompletionResult, GradingCall, PrimitiveGrade
+from ddpr.rewards.critpt_ai.llm.semantic import LLMSemanticJudge, SemanticJudgeConfig
+from ddpr.rewards.critpt_ai.schemas import CompletionResult, GradingCall, PrimitiveGrade
 
 
 @pytest.mark.parametrize(
@@ -129,7 +129,7 @@ def correct():
 @pytest.mark.parametrize("kind", ["semantic", "equivalence"])
 @pytest.mark.parametrize("structured", [False, True])
 def test_shared_completion_contract(monkeypatch, kind, structured):
-    from ddpr.rewards.physics.llm import equivalence, semantic
+    from ddpr.rewards.critpt_ai.llm import equivalence, semantic
 
     def forbidden(*args, **kwargs):
         pytest.fail("Injected completion must bypass the default client")
@@ -369,7 +369,7 @@ def test_bedrock_semantic_client(monkeypatch):
     ],
 )
 def test_ambiguous_judge_json_is_rejected(content):
-    from ddpr.rewards.physics.llm.utils import extract_json_object
+    from ddpr.rewards.critpt_ai.llm.utils import extract_json_object
 
     with pytest.raises(ValueError):
         extract_json_object(content)
@@ -377,7 +377,7 @@ def test_ambiguous_judge_json_is_rejected(content):
 
 @pytest.mark.parametrize("wrapper", ["{}", "```json\n{}\n```", "Result: {} Done."])
 def test_single_judge_json_preserves_content(wrapper):
-    from ddpr.rewards.physics.llm.utils import extract_json_object
+    from ddpr.rewards.critpt_ai.llm.utils import extract_json_object
 
     payload = {"verdict": "correct", "rationale": "Use ``` and {x} literally"}
     assert extract_json_object(wrapper.format(json.dumps(payload))) == payload
