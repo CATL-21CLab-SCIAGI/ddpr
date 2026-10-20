@@ -107,7 +107,7 @@ keep `ddpr/data` independent of training frameworks.
 ## Coding conventions
 
 CritPt-AI grading is owned by DDSR-Bench under
-`ddsr_bench/benchmarks/critpt/evaluation/critpt_ai/`, independently of consensus
+`ddsr_bench/benchmarks/critpt/evaluation/ai/`, independently of consensus
 and shared grading utilities. DDPR's `CritptAiReward` only loads private training
 metadata and maps reports to scores. Preserve external Auto/Freestyle contracts.
 Keep provider reuse additive; review redundancy separately before removing clients.

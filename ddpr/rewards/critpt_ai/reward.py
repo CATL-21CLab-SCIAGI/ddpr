@@ -9,21 +9,21 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.critpt_ai.inputs import (
+from ddsr_bench.benchmarks.critpt.evaluation.ai.grader import grade_response
+from ddsr_bench.benchmarks.critpt.evaluation.ai.io.inputs import (
     load_problem as load_task_problem,
 )
-from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.critpt_ai.inputs import (
+from ddsr_bench.benchmarks.critpt.evaluation.ai.io.inputs import (
     parse_grading_problem,
 )
-from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.critpt_ai.schemas import (
+from ddsr_bench.benchmarks.critpt.evaluation.ai.io.schemas import (
     GradeReport,
     GradingInput,
 )
-from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.grader import grade_response
-from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.llm.equivalence import (
+from ddsr_bench.benchmarks.critpt.evaluation.ai.llm.equivalence import (
     EquivalenceJudge,
 )
-from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.llm.semantic import (
+from ddsr_bench.benchmarks.critpt.evaluation.ai.llm.semantic import (
     LLMSemanticJudge,
 )
 

@@ -6,7 +6,7 @@ answer processing and report schemas live in DDSR-Bench.
 
 ## Setup
 
-Use the DDSR-Bench checkout containing `benchmarks.critpt.evaluation.critpt_ai`;
+Use the DDSR-Bench checkout containing `benchmarks.critpt.evaluation.ai`;
 this incorporation is not yet released:
 
 ```bash
@@ -15,7 +15,7 @@ export DDPR_REWARD=ddpr.rewards.critpt_ai.CritptAiReward
 ```
 
 The grader guide at
-`ddsr_bench/benchmarks/critpt/evaluation/critpt_ai/README.md` in the DDSR-Bench
+`ddsr_bench/benchmarks/critpt/evaluation/ai/README.md` in the DDSR-Bench
 checkout owns judge configuration and execution limits.
 Set `DDPR_CRITPT_AI_EQUIVALENCE_JUDGE=false` to disable rule-grading LLM fallback;
 Freestyle still needs its semantic judge. Existing OpenAI and Bedrock clients

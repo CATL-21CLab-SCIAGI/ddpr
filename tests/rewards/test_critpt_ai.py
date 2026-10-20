@@ -13,21 +13,21 @@ import pytest
 
 pytest.importorskip("pydantic")
 pytest.importorskip("sympy")
-pytest.importorskip("ddsr_bench.benchmarks.critpt.evaluation.critpt_ai")
+pytest.importorskip("ddsr_bench.benchmarks.critpt.evaluation.ai")
 
-from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai import answer, grader
-from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.critpt_ai.schemas import (
+from ddsr_bench.benchmarks.critpt.evaluation.ai import answer, grader
+from ddsr_bench.benchmarks.critpt.evaluation.ai.io.schemas import (
     GradeReport,
 )
-from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.llm.equivalence import (
+from ddsr_bench.benchmarks.critpt.evaluation.ai.llm.equivalence import (
     EquivalenceJudgeConfig,
     LLMEquivalenceJudge,
 )
-from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.llm.semantic import (
+from ddsr_bench.benchmarks.critpt.evaluation.ai.llm.semantic import (
     LLMSemanticJudge,
     SemanticJudgeConfig,
 )
-from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.runtime import GraderTimeout
+from ddsr_bench.benchmarks.critpt.evaluation.ai.runtime import GraderTimeout
 
 from ddpr.rewards import load_reward
 from ddpr.rewards.critpt_ai import (
@@ -473,7 +473,7 @@ import json
 import sys
 sys.path.insert(0, sys.argv[1])
 from standalone_critpt_ai.grader import grade_response
-from standalone_critpt_ai.critpt_ai.inputs import parse_grading_problem
+from standalone_critpt_ai.io.inputs import parse_grading_problem
 problem = parse_grading_problem(json.loads(sys.argv[2]))
 report = grade_response(problem, "", judge_enabled=False)
 assert report.extraction_status == "missing_answer_function"
@@ -536,14 +536,14 @@ def test_slime_reward_calls_real_grader_from_worker_thread(monkeypatch):
 
 
 def test_rule_comparisons():
-    from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.rule.categorical import (
+    from ddsr_bench.benchmarks.critpt.evaluation.ai.rule.categorical import (
         grade_categorical,
     )
-    from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.rule.numeric import (
+    from ddsr_bench.benchmarks.critpt.evaluation.ai.rule.numeric import (
         grade_exact_numeric,
         grade_floating_numeric,
     )
-    from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.rule.symbolic import (
+    from ddsr_bench.benchmarks.critpt.evaluation.ai.rule.symbolic import (
         grade_symbolic,
     )
 
@@ -662,7 +662,7 @@ def test_legacy_freestyle_accepts_mapping_input():
 def test_native_report_formatting(freestyle):
     import hashlib
 
-    from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.critpt_ai.outputs import (
+    from ddsr_bench.benchmarks.critpt.evaluation.ai.io.outputs import (
         format_report,
     )
     from sympy import Rational

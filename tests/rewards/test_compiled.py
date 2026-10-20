@@ -9,16 +9,16 @@ import pytest
 
 pytest.importorskip("pydantic")
 pytest.importorskip("sympy")
-pytest.importorskip("ddsr_bench.benchmarks.critpt.evaluation.critpt_ai")
+pytest.importorskip("ddsr_bench.benchmarks.critpt.evaluation.ai")
 
-from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.critpt_ai.inputs import (
+from ddsr_bench.benchmarks.critpt.evaluation.ai.io.inputs import (
     load_problem,
 )
-from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.llm.semantic import (
+from ddsr_bench.benchmarks.critpt.evaluation.ai.llm.semantic import (
     LLMSemanticJudge,
     SemanticJudgeConfig,
 )
-from ddsr_bench.benchmarks.critpt.evaluation.critpt_ai.rule.compare import (
+from ddsr_bench.benchmarks.critpt.evaluation.ai.rule.compare import (
     grade_with_plan,
 )
 
