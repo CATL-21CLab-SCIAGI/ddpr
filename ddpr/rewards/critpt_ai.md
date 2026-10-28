@@ -24,10 +24,13 @@ Keep the student's prompt public: do not put grading plans or references into
 The reward is 1.0 for correct and 0.0 for incorrect responses. Judge uncertainty,
 API failures and grader errors raise `CritptAiRewardError` with a private `.report`
 and `.sample_id`; they are not zero rewards. Dataset/configuration errors also
-surface as errors.
+surface as errors when the shared grader raises them. Some invalid references or
+comparison failures are upstream `fail` results and therefore map to zero; DDPR
+does not reinterpret those results.
 Auto supports floating numeric, exact, symbolic and categorical answers, with
 optional exact/symbolic equivalence judging. Freestyle uses SemanticJudge and
-supports multiple answer items. Auto composite is not connected yet.
+supports multiple answer items. Auto also supports upstream composite grading;
+DDPR maps its overall pass/fail to a binary reward, not its partial score.
 
 Set `DDPR_CRITPT_AI_EQUIVALENCE_JUDGE=false` to disable exact/symbolic LLM fallback;
 Freestyle still requires its semantic judge. Python callers use

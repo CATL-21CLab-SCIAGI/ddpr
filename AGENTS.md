@@ -11,6 +11,11 @@ in the sibling ddsr-bench project; do not infer style from names alone:
 
 ## Maintenance
 
+CritPt-AI grading follows DDSR-Bench's pinned Auto_CritPt_Grader behavior.
+Do not change verdicts, fallback rules or failures during integration. DDPR only
+maps the shared report to training rewards; upstream scoring fixes need separate
+approval and differential tests in DDSR-Bench.
+
 Keep handwritten changes small enough to review (about 200 lines when practical).
 Search for equivalent operations and inspect callers before adding helpers;
 preserve scoring and failure semantics when consolidating code. Avoid speculative

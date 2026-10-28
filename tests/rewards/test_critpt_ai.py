@@ -245,7 +245,7 @@ def test_invalid_student_response_is_zero(response, status):
 
 
 @pytest.mark.parametrize("failed_import", [1, 2])
-def test_missing_sympy_is_not_a_zero_reward(monkeypatch, failed_import):
+def test_missing_sympy_matches_upstream_runtime_failure(monkeypatch, failed_import):
     original_import = builtins.__import__
     imports = 0
 
@@ -258,20 +258,18 @@ def test_missing_sympy_is_not_a_zero_reward(monkeypatch, failed_import):
         return original_import(name, globals, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", import_module)
-    with pytest.raises(CritptAiRewardError) as raised:
-        score(
-            CritptAiReward(llm_fallback=False), auto_problem("exact", "2"), block("2")
-        )
+    report = grade_response(auto_problem("exact", "2"), block("2"), llm_fallback=False)
     assert imports == failed_import
-    assert raised.value.report.grading_status == "grader_error"
-    assert "SymPy dependency unavailable" in raised.value.report.error_message
+    assert report.grading_status == "not_graded"
+    assert report.extraction_status == "runtime_failure"
+    assert "SymPy dependency unavailable" in report.error_message
 
 
 @pytest.mark.parametrize(
     "kind,expression", [("exact", "2"), ("symbolic", "2*x"), ("symbolic", "x+1")]
 )
 @pytest.mark.parametrize("error", [RuntimeError, TypeError, ValueError])
-def test_comparison_errors_are_not_zero_rewards(monkeypatch, kind, expression, error):
+def test_upstream_comparison_error_rewards(monkeypatch, kind, expression, error):
     def fail(*args, **kwargs):
         raise error("comparison failed internally")
 
@@ -282,12 +280,10 @@ def test_comparison_errors_are_not_zero_rewards(monkeypatch, kind, expression, e
         else auto_problem("exact", "2")
     )
     response = block(expression)
-    with pytest.raises(CritptAiRewardError) as raised:
-        score(CritptAiReward(llm_fallback=False), problem, response)
-    assert raised.value.report.grading_status == "grader_error"
-    assert raised.value.report.extraction_status == "success"
-    assert raised.value.report.extracted_answer is not None
-    assert "comparison failed internally" in raised.value.report.error_message
+    # Upstream catches comparison failures as failed grades. Its identical-symbolic
+    # fast path does not invoke simplify, so that case still passes.
+    expected = float(kind == "symbolic" and expression == "2*x")
+    assert score(CritptAiReward(llm_fallback=False), problem, response) == expected
 
 
 def test_floating_expression_is_not_silently_rounded():
@@ -430,19 +426,16 @@ def test_bad_metadata_is_not_a_training_score(metadata, error):
         load_problem(metadata)
 
 
-def test_bad_or_composite_contract_is_not_a_training_score():
-    problem = auto_problem()
+def test_upstream_composite_and_minimal_contracts():
+    problem = auto_problem(expected="1")
     problem["answer_contract"]["answer_type"] = "composite"
-    with pytest.raises(ValueError, match="not supported"):
-        grade_response(problem, block("1"))
-    problem = auto_problem()
+    assert score(CritptAiReward(llm_fallback=False), problem, block("1")) == 1
+    problem = auto_problem(expected="1")
     problem["grading_plan"]["calls"] *= 2
-    with pytest.raises(ValueError, match="not supported"):
-        grade_response(problem, block("1"))
-    problem = auto_problem()
+    assert score(CritptAiReward(llm_fallback=False), problem, block("1")) == 1
+    problem = auto_problem(expected="1")
     problem["answer_contract"]["answer_type"] = "symbolic"
-    with pytest.raises(ValueError, match="must match"):
-        grade_response(problem, block("1"))
+    assert score(CritptAiReward(llm_fallback=False), problem, block("1")) == 1
 
 
 @pytest.mark.parametrize("response", [None, 42, [], b"answer"])
@@ -577,39 +570,30 @@ def test_swift_adapter_with_mocked_framework(monkeypatch):
         ("symbolic", "1", {"variables": ["x"]}),
     ],
 )
-def test_invalid_references_are_not_zero_rewards(kind, expected, args):
+def test_upstream_invalid_reference_rewards(kind, expected, args):
     problem = auto_problem(kind, expected, args)
     response = block("1.0" if kind == "floating_numeric" else "2")
-    with pytest.raises(CritptAiRewardError) as raised:
-        score(CritptAiReward(llm_fallback=False), problem, response)
-    assert raised.value.report.grading_status == "grader_error"
+    assert score(CritptAiReward(llm_fallback=False), problem, response) == 0
 
 
 @pytest.mark.parametrize("timeout", ["0", "nan", "inf", "invalid"])
-def test_invalid_numeric_timeout_is_a_grader_error(monkeypatch, timeout):
+def test_invalid_numeric_timeout_raises(monkeypatch, timeout):
     monkeypatch.setenv("AUTO_CRITPT_NUMERIC_CHECK_TIMEOUT_SECONDS", timeout)
-    with pytest.raises(CritptAiRewardError) as raised:
+    with pytest.raises(ValueError):
         score(
             CritptAiReward(equivalence_judge=forbidden_judge()),
             auto_problem(expected="2"),
             block("3"),
         )
-    assert raised.value.report.grading_status == "grader_error"
-    assert raised.value.report.extraction_status == "success"
-    assert (
-        "Expression equivalence assessment failed" in raised.value.report.error_message
-    )
 
 
-def test_judge_configuration_failure_is_reported(monkeypatch):
+def test_upstream_judge_configuration_failure_raises(monkeypatch):
     monkeypatch.setenv("AUTO_CRITPT_GRADER_JUDGE_BACKEND", "invalid")
-    report = grade_response(
-        auto_problem("symbolic", "x", {"variables": ["x"]}),
-        block("sp.fresnels(x)"),
-    )
-    assert report.grading_status == "grader_error"
-    assert report.extraction_status == "text_only"
-    assert "backend" in report.error_message
+    with pytest.raises(ValueError, match="backend"):
+        grade_response(
+            auto_problem("symbolic", "x", {"variables": ["x"]}),
+            block("sp.fresnels(x)"),
+        )
 
 
 @pytest.mark.parametrize("llm_fallback", [False, True])
@@ -631,11 +615,10 @@ def test_comparison_timeout_preserves_fallback(monkeypatch, llm_fallback):
 
 
 @pytest.mark.parametrize("target", ["", " ", "\n"])
-def test_empty_grading_target_is_invalid_metadata(target):
+def test_upstream_empty_grading_target(target):
     problem = auto_problem(expected="1")
     problem["grading_plan"]["calls"][0]["target"] = target
-    with pytest.raises(ValueError, match="target"):
-        load_problem({"problem": problem})
+    assert load_problem({"problem": problem}).grading_plan.calls[0].target == target
 
 
 def test_legacy_freestyle_accepts_mapping_input():
@@ -698,16 +681,15 @@ def test_native_report_formatting(freestyle):
         ),
     ],
 )
-def test_invalid_reference_cannot_be_an_incorrect_answer(
-    kind, target, kwargs, response
-):
-    with pytest.raises(CritptAiRewardError) as raised:
+def test_upstream_reference_failure_reward(kind, target, kwargs, response):
+    assert (
         score(
             CritptAiReward(llm_fallback=False),
             auto_problem(kind, target, kwargs),
             block(response),
         )
-    assert raised.value.report.grading_status == "grader_error"
+        == 0
+    )
 
 
 def test_reward_fallback_keyword_migration(monkeypatch):

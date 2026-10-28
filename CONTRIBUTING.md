@@ -138,14 +138,16 @@ Keep provider reuse additive; review redundancy separately before removing clien
 Grader changes and core tests belong in DDSR-Bench; reward/backend integration
 and replay tests belong here. Install both checkouts when developing this boundary.
 
-For folder reviews, compare the actual sibling `ddsr_bench/grading/` layout and
+For folder reviews, compare the sibling CritPt `evaluation/ai/` layout and
 review responsibilities and dependencies together, not just individual names.
 Use `utils.py` for shared helpers. Keep rule interfaces consistent:
 `grade_exact_numeric`, `grade_floating_numeric`, `grade_symbolic` and
 `grade_categorical` take `(answer, target, **kwargs)`. Serialized plan fields
 remain unchanged; dispatch unpacks `args`. Numerical cross-checks provide
-evidence rather than grades. Invalid references, configuration and internal
-failures must not become incorrect-answer rewards.
+evidence rather than grades. Preserve upstream failure classifications, even
+where upstream reports a reference/comparison defect as a failed grade. DDPR
+maps reports without independently reclassifying them; unresolved report statuses
+remain errors rather than zero rewards.
 
 Execution helpers use `grading_plan`, `fn` for a callable, `extract_fn` for the extraction
 callback, and `timeout` in seconds. Keep related getters and constants aligned
